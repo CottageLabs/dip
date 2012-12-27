@@ -1,4 +1,4 @@
-import os, datetime, json
+import os, datetime, json, uuid
 import xml.etree.ElementTree as etree
 
 class DIP(object):
@@ -69,7 +69,16 @@ class DIP(object):
         """
         Get a list of Endpoint objects currently part of this DIP
         """
-        pass
+        endpoints = []
+        for e in self.deposit_info_raw['endpoints']:
+            endpoints.append(Endpoint(raw=e))
+        return endpoints
+        
+    def get_endpoint(self, endpoint_id):
+        for e in self.deposit_info_raw['endpoints']:
+            if e['id'] == endpoint_id:
+                return Endpoint(raw=e)
+        return None
     
     def set_endpoint(self, endpoint=None, id=None, sd_iri=None, col_iri=None, package=None, username=None, obo=None):
         """
@@ -87,6 +96,9 @@ class DIP(object):
         When creating an endpoint, only the sd_iri is strictly necessary, although deposit will not
         be able to go ahead without a col_iri.
         
+        The id should be a UUID4, and don't make it up yourself, if you don't have an id for the
+        object leave it to this method to mint one for you
+        
         Keyword arguments:
         endpoint    -   an Endpoint object to be added or replaced
         id          -   the id of the endpoint (a UUID4 string)
@@ -96,9 +108,43 @@ class DIP(object):
         username    -   username to authenticate with
         obo         -   on behalf of user to deposit as
         
-        Returns an Endpoint object which is part of the DIP
+        Returns an Endpoint object
         """
-        pass
+        # if we are not supplied an endpoint, make an Endpoint object from the other params
+        if endpoint is None:
+            if sd_iri is None:
+                raise InitialiseException("attempt to set endpoint without sd_iri - this is required")
+            endpoint = Endpoint(sd_iri=sd_iri, col_iri=col_iri, package=package, username=username, obo=obo, id=id)
+        
+        # validate the sd_iri of the supplied endpoint
+        if endpoint.sd_iri is None:
+            raise InitialiseException("attempt to set endpoint without sd_iri - this is required")
+        
+        # determine if this is a new endpoint or not (and its position in the endpoints array)
+        existing_index = -1
+        if endpoint.id is not None:
+            for i in range(len(self.deposit_info_raw['endpoints'])):
+                if self.deposit_info_raw['endpoints'][i]['id'] == endpoint.id:
+                    existing_index = i
+                    break
+        else:
+            # otherwise, give the endpoint an id
+            endpoint.id = str(uuid.uuid4())
+        
+        # if the endpoint already exists, remove it
+        if existing_index > -1:
+            del self.deposit_info_raw['endpoints'][i] # FIXME: does this trigger the setter?
+        
+        # add the new endpoint to the deposit info
+        self.deposit_info_raw['endpoints'].append(endpoint.raw)
+        
+        # FIXME: we may not need to do this, depending on how the two above
+        # modify operations behave
+        self._save_deposit_info()
+        
+        # return the endpoint object (the wrapped data structure is now part of the
+        # deposit info on this object, and thus can be updated by reference)
+        return endpoint
         
     def remove_endpoint(self, endpoint_id, delete_in_repository=False):
         """
@@ -310,3 +356,73 @@ class InitialiseException(Exception):
     
     def __str__(self):
         return repr(self.message)
+        
+class Endpoint(object):
+    def __init__(self, raw=None, sd_iri=None, col_iri=None, package=None, username=None, obo=None, id=None):
+        if raw is not None:
+            self.raw = raw
+        else:
+            self.raw = {}
+            if sd_iri is not None:
+                self.raw['sd_iri'] = sd_iri
+            if col_iri is not None:
+                self.raw['col_iri'] = col_iri
+            if package is not None:
+                self.raw['package'] = package
+            if username is not None:
+                self.raw['username'] = username
+            if obo is not None:
+                self.raw['obo'] = obo
+            if id is not None:
+                self.raw['id'] = id
+        
+        if self.raw.get('id') is None:
+            self.raw['id'] = str(uuid.uuid4())
+    
+    @property
+    def sd_iri(self):
+        return self.raw.get('sd_iri')
+    
+    @sd_iri.setter
+    def sd_iri(self, value):
+        self.raw['sd_iri'] = value
+    
+    @property
+    def col_iri(self):
+        return self.raw.get('col_iri')
+    
+    @col_iri.setter
+    def col_iri(self, value):
+        self.raw['col_iri'] = value
+        
+    @property
+    def package(self):
+        return self.raw.get('package')
+    
+    @package.setter
+    def package(self, value):
+        self.raw['package'] = value
+    
+    @property
+    def username(self):
+        return self.raw.get('username')
+    
+    @username.setter
+    def username(self, value):
+        self.raw['username'] = value
+    
+    @property
+    def obo(self):
+        return self.raw.get('obo')
+        
+    @obo.setter
+    def obo(self, value):
+        self.raw['obo'] = value
+    
+    @property
+    def id(self):
+        return self.raw.get('id')
+        
+    @id.setter
+    def id(self, value):
+        self.raw['id'] = value

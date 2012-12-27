@@ -12,8 +12,9 @@ class TestConnection(TestController):
             shutil.rmtree(DIP_DIR)
         
     def tearDown(self):
-        if os.path.isdir(DIP_DIR):
-            shutil.rmtree(DIP_DIR)
+        #if os.path.isdir(DIP_DIR):
+        #    shutil.rmtree(DIP_DIR)
+        pass
     
     def test_01_create_new(self):
         # construct a new blank DIP
@@ -118,7 +119,118 @@ class TestConnection(TestController):
         
         dc = d2.dc_xml
         assert dc.tag == "other"
-        
-        
         assert len(dc) == 1
+        
+        # cleanup after ourselves
+        shutil.rmtree(DIP_DIR)
+    
+    def test_04_endpoint(self):
+        # a blank endpoint
+        e = dip.Endpoint()
+        assert e.id is not None
+        assert len(e.raw.keys()) == 1
+        
+        # an endpoint with its properties (except id)
+        e = dip.Endpoint(sd_iri="sd", col_iri="col", package="package", username="un", obo="obo")
+        assert e.sd_iri == "sd"
+        assert e.col_iri == "col"
+        assert e.package == "package"
+        assert e.username == "un"
+        assert e.obo == "obo"
+        assert e.id is not None
+        
+        # an endpoint with all its properties, including id
+        e = dip.Endpoint(sd_iri="sd", col_iri="col", package="package", username="un", obo="obo", id="1234")
+        assert e.sd_iri == "sd"
+        assert e.col_iri == "col"
+        assert e.package == "package"
+        assert e.username == "un"
+        assert e.obo == "obo"
+        assert e.id == "1234"
+        
+        raw = e.raw
+        
+        assert raw['sd_iri'] == "sd"
+        assert raw['col_iri'] == "col"
+        assert raw['package'] == "package"
+        assert raw['username'] == "un"
+        assert raw['obo'] == "obo"
+        assert raw['id'] == "1234"
+    
+    def test_05_set_endpoint(self):
+        # a fully populated endpoint
+        e = dip.Endpoint(sd_iri="sd", col_iri="col", package="package", username="un", obo="obo")
+        
+        # a deposit object we can work with
+        d = dip.DIP(DIP_DIR)
+
+        # set the endpoint directly
+        e2 = d.set_endpoint(endpoint=e)
+        
+        assert e2.id is not None
+        assert e2.col_iri == e.col_iri
+        assert e2.sd_iri == e.sd_iri
+        assert e2.package == e.package
+        assert e2.username == e.username
+        assert e2.obo == e.obo
+        
+        assert len(d.deposit_info_raw['endpoints']) == 1
+        assert d.deposit_info_raw['endpoints'][0]['col_iri'] == "col"
+        
+        # set an endpoint by parameters
+        d.set_endpoint(sd_iri="sd2", col_iri="col2", package="package2", username="un2", obo="obo2")
+        
+        assert len(d.deposit_info_raw['endpoints']) == 2
+        assert d.deposit_info_raw['endpoints'][1]['col_iri'] == "col2"
+        
+        # set an endpoint with conflicting parameters
+        e = dip.Endpoint(sd_iri="sd3", col_iri="col3", package="package3", username="un3", obo="obo3")
+        e3 = d.set_endpoint(endpoint=e, sd_iri="sd4")
+        
+        assert e3.sd_iri == "sd3"
+        
+        # cleanup after ourselves
+        shutil.rmtree(DIP_DIR)
+        
+    def test_06_replace_endpoint(self):
+        # a fully populated endpoint
+        e = dip.Endpoint(sd_iri="sd", col_iri="col", package="package", username="un", obo="obo")
+        
+        # a deposit object we can work with
+        d = dip.DIP(DIP_DIR)
+
+        # set the endpoint directly
+        e2 = d.set_endpoint(endpoint=e)
+        
+        # a replacement endpoint
+        e3 = dip.Endpoint(sd_iri="sd3", col_iri="col3", package="package3", username="un3", obo="obo3", id=e2.id)
+        
+        # replace the endpoint
+        d.set_endpoint(endpoint=e3)
+        
+        assert len(d.deposit_info_raw['endpoints']) == 1
+        assert d.deposit_info_raw['endpoints'][0]['col_iri'] == "col3"
+        
+        # cleanup after ourselves
+        shutil.rmtree(DIP_DIR)
+    
+    def test_07_get_endpoint(self):
+        # a fully populated endpoint
+        e = dip.Endpoint(sd_iri="sd", col_iri="col", package="package", username="un", obo="obo")
+        
+        # a deposit object we can work with
+        d = dip.DIP(DIP_DIR)
+
+        # set the endpoint directly
+        e2 = d.set_endpoint(endpoint=e)
+        
+        es = d.get_endpoints()
+        assert len(es) == 1
+        assert es[0].sd_iri == "sd"
+        
+        e3 = d.get_endpoint(e2.id)
+        assert e3.col_iri == "col"
+        
+        # cleanup after ourselves
+        shutil.rmtree(DIP_DIR)
         

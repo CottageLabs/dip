@@ -1,1 +1,1 @@
-from dip import DIP
+from dip import DIP, Endpoint
