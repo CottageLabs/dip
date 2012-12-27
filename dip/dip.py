@@ -133,7 +133,7 @@ class DIP(object):
         
         # if the endpoint already exists, remove it
         if existing_index > -1:
-            del self.deposit_info_raw['endpoints'][i] # FIXME: does this trigger the setter?
+            del self.deposit_info_raw['endpoints'][existing_index] # FIXME: does this trigger the setter?
         
         # add the new endpoint to the deposit info
         self.deposit_info_raw['endpoints'].append(endpoint.raw)
@@ -157,7 +157,18 @@ class DIP(object):
         Keyword Arguments
         delete_in_repository    - issue a delete request against the repository first
         """
-        pass
+        if delete_in_repository:
+            raise NotImplementedError("DELETE in repository on endpoint remove is not currently supported")
+        
+        existing_index = -1
+        for i in range(len(self.deposit_info_raw['endpoints'])):
+            if self.deposit_info_raw['endpoints'][i]['id'] == endpoint_id:
+                existing_index = i
+                break
+        
+        if existing_index > -1:
+            del self.deposit_info_raw['endpoints'][existing_index]
+            self._save_deposit_info()
         
     def get_history(self, endpoint_id):
         """

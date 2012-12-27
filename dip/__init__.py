@@ -1,1 +1,1 @@
-from dip import DIP, Endpoint
+from dip import DIP, Endpoint, InitialiseException

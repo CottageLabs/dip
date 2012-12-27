@@ -10,11 +10,14 @@ class TestConnection(TestController):
     def setUp(self):
         if os.path.isdir(DIP_DIR):
             shutil.rmtree(DIP_DIR)
+        elif os.path.isfile(DIP_DIR):
+            os.remove(DIP_DIR)
         
     def tearDown(self):
-        #if os.path.isdir(DIP_DIR):
-        #    shutil.rmtree(DIP_DIR)
-        pass
+        if os.path.isdir(DIP_DIR):
+            shutil.rmtree(DIP_DIR)
+        elif os.path.isfile(DIP_DIR):
+            os.remove(DIP_DIR)
     
     def test_01_create_new(self):
         # construct a new blank DIP
@@ -233,4 +236,59 @@ class TestConnection(TestController):
         
         # cleanup after ourselves
         shutil.rmtree(DIP_DIR)
+        
+    def test_08_remove_endpoint(self):
+        # a fully populated endpoint
+        e = dip.Endpoint(sd_iri="sd", col_iri="col", package="package", username="un", obo="obo")
+        
+        # a deposit object we can work with
+        d = dip.DIP(DIP_DIR)
+
+        # set the endpoint directly
+        e2 = d.set_endpoint(endpoint=e)
+        
+        assert d.get_endpoint(e2.id) is not None
+        
+        # now remove the endpoint by id
+        d.remove_endpoint(e2.id)
+        
+        assert d.get_endpoint(e2.id) is None
+        
+        # cleanup after ourselves
+        shutil.rmtree(DIP_DIR)
+        
+    def test_09_remove_endpoint_errors(self):
+        # a fully populated endpoint
+        e = dip.Endpoint(sd_iri="sd", col_iri="col", package="package", username="un", obo="obo")
+        
+        # a deposit object we can work with
+        d = dip.DIP(DIP_DIR)
+
+        # set the endpoint directly
+        e2 = d.set_endpoint(endpoint=e)
+        
+        with self.assertRaises(NotImplementedError):
+            d.remove_endpoint(e2.id, True)
+        
+        # cleanup after ourselves
+        shutil.rmtree(DIP_DIR)
+    
+    def test_10_init_errors(self):
+        # try and create a DIP on a path which is actually a file
+        f = open(DIP_DIR, "wb")
+        f.write("file")
+        f.close()
+        with self.assertRaises(dip.InitialiseException):
+            d = dip.DIP(DIP_DIR)
+        os.remove(DIP_DIR)
+        
+        # try and create a dip where the deposit.json file is actually a directory
+        os.makedirs(os.path.join(DIP_DIR, "deposit.json"))
+        with self.assertRaises(dip.InitialiseException):
+            d = dip.DIP(DIP_DIR)
+        shutil.rmtree(DIP_DIR)
+        
+        
+        
+        
         
