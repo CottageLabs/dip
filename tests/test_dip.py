@@ -4,20 +4,27 @@ import xml.etree.ElementTree as etree
 import dip
 
 DIP_DIR = "dip_test_dir"
+PRES_DIR = "dip_preserve_dir"
+RESOURCES = os.path.join("tests", "resources")
+TESTFILE_MD5 = "6fd9af1196c0f77e463bf2dcfdbef852"
+TESTFILE2_MD5 = "8a86db9c36f1f7a0d8905afe3649b886"
 
 class TestConnection(TestController):
     
-    def setUp(self):
+    def _cleanup(self):
         if os.path.isdir(DIP_DIR):
             shutil.rmtree(DIP_DIR)
         elif os.path.isfile(DIP_DIR):
             os.remove(DIP_DIR)
+    
+    def _preserve_result(self):
+        os.rename(DIP_DIR, PRES_DIR)
+    
+    def setUp(self):
+        self._cleanup()
         
     def tearDown(self):
-        if os.path.isdir(DIP_DIR):
-            shutil.rmtree(DIP_DIR)
-        elif os.path.isfile(DIP_DIR):
-            os.remove(DIP_DIR)
+        self._cleanup()
     
     def test_01_create_new(self):
         # construct a new blank DIP
@@ -56,10 +63,6 @@ class TestConnection(TestController):
         assert dc.tag == "metadata"
         assert len(dc) == 0
         
-        # cleanup after ourselves
-        shutil.rmtree(DIP_DIR)
-        
-        
     def test_02_update_parts(self):
         # construct a new blank DIP
         d = dip.DIP(DIP_DIR)
@@ -88,9 +91,6 @@ class TestConnection(TestController):
         dc = d.dc_xml
         assert dc.tag == "other"
         assert len(dc) == 1
-        
-        # cleanup after ourselves
-        shutil.rmtree(DIP_DIR)
     
     def test_03_init_existing(self):
         # construct a new blank DIP
@@ -124,8 +124,6 @@ class TestConnection(TestController):
         assert dc.tag == "other"
         assert len(dc) == 1
         
-        # cleanup after ourselves
-        shutil.rmtree(DIP_DIR)
     
     def test_04_endpoint(self):
         # a blank endpoint
@@ -192,9 +190,6 @@ class TestConnection(TestController):
         
         assert e3.sd_iri == "sd3"
         
-        # cleanup after ourselves
-        shutil.rmtree(DIP_DIR)
-        
     def test_06_replace_endpoint(self):
         # a fully populated endpoint
         e = dip.Endpoint(sd_iri="sd", col_iri="col", package="package", username="un", obo="obo")
@@ -213,9 +208,6 @@ class TestConnection(TestController):
         
         assert len(d.deposit_info_raw['endpoints']) == 1
         assert d.deposit_info_raw['endpoints'][0]['col_iri'] == "col3"
-        
-        # cleanup after ourselves
-        shutil.rmtree(DIP_DIR)
     
     def test_07_get_endpoint(self):
         # a fully populated endpoint
@@ -235,7 +227,7 @@ class TestConnection(TestController):
         assert e3.col_iri == "col"
         
         # cleanup after ourselves
-        shutil.rmtree(DIP_DIR)
+        self._cleanup()
         
     def test_08_remove_endpoint(self):
         # a fully populated endpoint
@@ -254,9 +246,6 @@ class TestConnection(TestController):
         
         assert d.get_endpoint(e2.id) is None
         
-        # cleanup after ourselves
-        shutil.rmtree(DIP_DIR)
-        
     def test_09_remove_endpoint_errors(self):
         # a fully populated endpoint
         e = dip.Endpoint(sd_iri="sd", col_iri="col", package="package", username="un", obo="obo")
@@ -269,9 +258,6 @@ class TestConnection(TestController):
         
         with self.assertRaises(NotImplementedError):
             d.remove_endpoint(e2.id, True)
-        
-        # cleanup after ourselves
-        shutil.rmtree(DIP_DIR)
     
     def test_10_init_errors(self):
         # try and create a DIP on a path which is actually a file
@@ -280,15 +266,83 @@ class TestConnection(TestController):
         f.close()
         with self.assertRaises(dip.InitialiseException):
             d = dip.DIP(DIP_DIR)
-        os.remove(DIP_DIR)
+        self._cleanup()
         
         # try and create a dip where the deposit.json file is actually a directory
         os.makedirs(os.path.join(DIP_DIR, "deposit.json"))
         with self.assertRaises(dip.InitialiseException):
             d = dip.DIP(DIP_DIR)
-        shutil.rmtree(DIP_DIR)
         
+    def test_11_add_file_not_exists(self):
+        d = dip.DIP(DIP_DIR)
+        with self.assertRaises(dip.InitialiseException):
+            d.set_file("wibble")
         
+    def test_12_add_new_file(self):
+        # first let's add and check a new file
+        d = dip.DIP(DIP_DIR)
+        testfile = os.path.join(RESOURCES, "testfile.txt")
+        d.set_file(testfile)
+        
+        assert len(d.deposit_info_raw['files']) == 1
+        
+        fr = d.deposit_info_raw['files'][0]
+        
+        assert fr['path'] == os.path.join("..", testfile)
+        assert fr['md5'] == TESTFILE_MD5
+        
+        created = datetime.datetime.strptime(fr['added'], "%Y-%m-%dT%H:%M:%SZ")
+        updated = datetime.datetime.strptime(fr['added'], "%Y-%m-%dT%H:%M:%SZ")
+        n = datetime.datetime.now()
+        assert created <= n
+        assert updated <= n
+        assert updated == created
+        
+        # try adding the same file again, which will hopefully have no particular effect
+        d.set_file(testfile)
+        
+        assert len(d.deposit_info_raw['files']) == 1
+        
+        fr = d.deposit_info_raw['files'][0]
+        
+        assert fr['path'] == os.path.join("..", testfile) # the path should have been transformed in this way
+        assert fr['md5'] == TESTFILE_MD5
+        
+        created = datetime.datetime.strptime(fr['added'], "%Y-%m-%dT%H:%M:%SZ")
+        updated = datetime.datetime.strptime(fr['added'], "%Y-%m-%dT%H:%M:%SZ")
+        n = datetime.datetime.now()
+        assert created <= n
+        assert updated <= n
+        assert updated == created
+        
+        # now try adding a new file
+        tf2 = os.path.join(RESOURCES, "testfile2.txt")
+        d.set_file(tf2)
+        
+        assert len(d.deposit_info_raw['files']) == 2
+        
+        fr = d.deposit_info_raw['files'][1]
+        
+        assert fr['path'] == os.path.join("..", tf2)
+        assert fr['md5'] == TESTFILE2_MD5
+    
+    def test_13_get_files(self):
+        d = dip.DIP(DIP_DIR)
+        testfile = os.path.join(RESOURCES, "testfile.txt")
+        d.set_file(testfile)
+        tf2 = os.path.join(RESOURCES, "testfile2.txt")
+        d.set_file(tf2)
+        
+        files = d.get_files()
+        assert len(files) == 2
+        for f in files:
+            assert f.path in [os.path.abspath(testfile), os.path.abspath(tf2)]
+            assert f.md5 in [TESTFILE_MD5, TESTFILE2_MD5]
+    
+    def test_14_update_existing_file(self):
+        pass
+        
+    
         
         
         

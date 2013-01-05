@@ -1,5 +1,19 @@
-import os, datetime, json, uuid
+import os, datetime, json, uuid, hashlib
 import xml.etree.ElementTree as etree
+
+def _normalise_path(path, normalise_to):
+    # path may either be:
+    # - relative to the cwd of the script
+    # - absolute
+    #
+    # we want it to be relative to the self.base_dir path
+    real = os.path.realpath(path)
+    rel = os.path.relpath(real, normalise_to)
+    return rel
+
+def _absolute_path(rel_path, from_path):
+    path = os.path.normpath(os.path.join(from_path, rel_path))
+    return os.path.abspath(path)
 
 class DIP(object):
     
@@ -8,6 +22,7 @@ class DIP(object):
         self._guarantee_directory(base_dir)
        
         # store the base_dir parameter on the object
+        # NOTE: base_dir is relative to the executing script, or an absolute path
         self.base_dir = base_dir
         
         # load the deposit info (which will initialise if necessary)
@@ -52,7 +67,20 @@ class DIP(object):
         """
         Get a list of DepositFile objects currently part of this DIP
         """
-        pass
+        files = []
+        for fr in self.deposit_info_raw['files']:
+            files.append(DepositFile(self.base_dir, raw=fr))
+        return files
+        
+    def get_file(self, path):
+        # calculate the real path (in case this is a relative path)
+        real_path = os.path.realpath(path)
+        
+        # now find out if we already have a record for that file
+        for fr in self.deposit_info_raw['files']:
+            if os.path.realpath(fr['path']) == real_path:
+                return DepositFile(self.base_dir, raw=fr)
+        return None
     
     def set_file(self, path):
         """
@@ -63,7 +91,26 @@ class DIP(object):
         
         Returns a DepositFile object representing the added file
         """
-        pass
+        # normalise the file path, to be relative to the self.base_dir, so that we can check it
+        norm_path = _normalise_path(path, self.base_dir)
+        
+        # check that the file exists
+        if not os.path.isfile(path):
+            raise InitialiseException(path + " (normalised to " +  norm_path + ") is not a path to a file")
+        
+        # now find out if we already have a record for that file
+        existing_record = None
+        for fr in self.deposit_info_raw['files']:
+            if fr['path'] == norm_path:
+                existing_record = fr
+                break
+        
+        # if we have an existing record for that file, just force an update
+        if existing_record is not None:
+            self._update_file_record(existing_record)
+        else:
+            # otherwise, add a new file record for that path
+            self._add_file_record(path)
     
     def get_endpoints(self):
         """
@@ -357,6 +404,28 @@ class DIP(object):
             doc = etree.parse(f)
             self._dc_xml = doc.getroot()
             
+    def _update_file_record(self, record):
+        path = _absolute_path(record['path'], self.base_dir)
+        with open(path) as f:
+            checksum = hashlib.md5(f.read()).hexdigest()
+        n = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        record['md5'] = checksum
+        record['updated'] = n
+        self._save_deposit_info()
+    
+    def _add_file_record(self, path):
+        with open(path, "r") as f:
+            checksum = hashlib.md5(f.read()).hexdigest()
+        n = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        record = {
+            "path" : _normalise_path(path, self.base_dir),
+            "md5" : checksum,
+            "added" : n,
+            "updated" : n,
+        }
+        self.deposit_info_raw['files'].append(record)
+        self._save_deposit_info()    
+            
 class InitialiseException(Exception):
     """
     Exception to be thrown if the initialisation of a DIP fails
@@ -437,3 +506,28 @@ class Endpoint(object):
     @id.setter
     def id(self, value):
         self.raw['id'] = value
+        
+class DepositFile(object):
+    def __init__(self, base_dir, raw={}):
+        self.base_dir = base_dir
+        self.raw = raw
+        
+    # path, md5, added, updated, endpoints
+    
+    @property
+    def path(self):
+        return _absolute_path(self.raw.get('path'), self.base_dir)
+     
+    @property
+    def md5(self):
+        return self.raw.get('md5')
+    
+    @property
+    def added(self):
+        return self.raw.get('added')
+    
+    @property
+    def updated(self):
+        return self.raw.get('updated')
+    
+    
