@@ -340,9 +340,26 @@ class TestConnection(TestController):
             assert f.md5 in [TESTFILE_MD5, TESTFILE2_MD5]
     
     def test_14_update_existing_file(self):
-        pass
+        d = dip.DIP(DIP_DIR)
+        testfile = os.path.join(RESOURCES, "testfile.txt")
+        d.set_file(testfile)
         
-    
+        # now, let's exchange testfile.txt for testfile2.txt
+        temp = os.path.join(RESOURCES, "testfile.txt.bak")
+        tf2 = os.path.join(RESOURCES, "testfile2.txt")
+        os.rename(testfile, temp)
+        shutil.copy(tf2, testfile)
         
+        # now add the new file, and check that the item gets updated
+        d.set_file(testfile)
+        
+        # before doing the assertions, switch the files back
+        os.remove(testfile)
+        os.rename(temp, testfile)
+        
+        # now make some assertions
+        f = d.get_file(testfile)
+        assert f.path == os.path.abspath(testfile)
+        assert f.md5 == TESTFILE2_MD5
         
         

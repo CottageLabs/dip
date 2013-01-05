@@ -74,11 +74,11 @@ class DIP(object):
         
     def get_file(self, path):
         # calculate the real path (in case this is a relative path)
-        real_path = os.path.realpath(path)
+        norm_path = _normalise_path(path, self.base_dir)
         
         # now find out if we already have a record for that file
         for fr in self.deposit_info_raw['files']:
-            if os.path.realpath(fr['path']) == real_path:
+            if fr['path'] == norm_path:
                 return DepositFile(self.base_dir, raw=fr)
         return None
     
