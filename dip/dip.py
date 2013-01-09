@@ -1,5 +1,7 @@
-import os, datetime, json, uuid, hashlib
+import os, datetime, json, uuid, hashlib, logging
 import xml.etree.ElementTree as etree
+
+log = logging.getLogger(__name__)
 
 def _normalise_path(path, normalise_to):
     # path may either be:
@@ -69,7 +71,7 @@ class DIP(object):
         """
         files = []
         for fr in self.deposit_info_raw['files']:
-            files.append(DepositFile(self.base_dir, raw=fr))
+            files.append(DepositFile(self, raw=fr))
         return files
         
     def get_file(self, path):
@@ -79,7 +81,7 @@ class DIP(object):
         # now find out if we already have a record for that file
         for fr in self.deposit_info_raw['files']:
             if fr['path'] == norm_path:
-                return DepositFile(self.base_dir, raw=fr)
+                return DepositFile(self, raw=fr)
         return None
     
     def set_file(self, path):
@@ -112,6 +114,14 @@ class DIP(object):
             # otherwise, add a new file record for that path
             self._add_file_record(path)
     
+    def remove_file(self, path):
+        # normalise the file path, to be relative to the self.base_dir, so that we can check it
+        norm_path = _normalise_path(path, self.base_dir)
+        
+        for i in range(len(self.deposit_info_raw['files'])):
+            if self.deposit_info_raw['files'][i]['path'] == norm_path:
+                del self.deposit_info_raw['files'][i]
+                
     def get_endpoints(self):
         """
         Get a list of Endpoint objects currently part of this DIP
@@ -289,7 +299,58 @@ class DIP(object):
         
         Return a DepositState object representing the results of this operation
         """
-        pass
+        # first update all the file records
+        files = self.get_files()
+        for f in files:
+            os_updated = datetime.datetime.fromtimestamp(os.path.getmtime(f.path))
+            if os_updated > f.updated:
+                # the file has been updated since we last looked at it, so run an update
+                self.set_file(f.path)
+        
+        # a new deposit state object for us to populate
+        ds = DepositState(self)
+        
+        # now retrieve them again, and see what the deal with the endpoints is
+        files = self.get_files()
+        for f in files:
+            log.info("checking state for " + f.path)
+            # check each file for whether it is up to date with the endpoint or not
+            for er in f.endpoints:
+                if f.updated > er.last_deposit:
+                    log.info(f.path + " is out of date with " + er.endpoint.id)
+                    ds.add_state(ds.OUT_OF_DATE, f, er)
+                else:
+                    log.info(f.path + " is up to date with " + er.endpoint.id)
+                    ds.add_state(ds.UP_TO_DATE, f, er)
+            # check each endpoint it has been deposited to to check that it has been deposited everywhere
+            feids = [er.endpoint.id for er in f.endpoints]
+            deids = [e.id for e in self.get_endpoints()]
+            for eid in deids:
+                if eid not in feids:
+                    log.info(f.path + " has not been deposited in " + eid)
+                    ds.add_state(ds.NOT_DEPOSITED, f, EndpointRecord(self.get_endpoint(eid), None))
+            # finally, if we have not reported anything so far on this file, record it as having no action so far
+            # (i.e. there are no deposit endpoints)
+            if len(ds._lookup_states(f.path)) == 0:
+                log.info(f.path + " - currently no action on this file")
+                ds.add_state(ds.NO_ACTION, f, None)
+        """
+        FIXME: need to revisit this when metadata files are implemented
+        for m in self.get_metadata_files():
+            # check each metadata file for whether it is up to date with the endpoint or not
+            for er in f.endpoints():
+                if f.updated() > er.last_deposit():
+                    ds.add_state(ds.OUT_OF_DATE, f, er)
+                else:
+                    ds.add_state(dc.UP_TO_DATE, f, er)
+            # check each endpoint it has been deposited to to check that it has been deposited everywhere
+            feids = [er.endpoint.id for er in f.endpoints()]
+            deids = [e.id for e in self.get_endpoints()]
+            for endpoint in deids:
+                if eid not in feids:
+                    ds.add_state(ds.NOT_DEPOSITED, f, f.get_endpoint_record(eid))
+        """
+        return ds
         
     def deposit(self, endpoint_id):
         """
@@ -460,6 +521,10 @@ class Endpoint(object):
             self.raw['id'] = str(uuid.uuid4())
     
     @property
+    def id(self):
+        return self.raw.get('id')
+    
+    @property
     def sd_iri(self):
         return self.raw.get('sd_iri')
     
@@ -508,15 +573,15 @@ class Endpoint(object):
         self.raw['id'] = value
         
 class DepositFile(object):
-    def __init__(self, base_dir, raw={}):
-        self.base_dir = base_dir
+    def __init__(self, dip, raw={}):
+        self.dip = dip
         self.raw = raw
         
     # path, md5, added, updated, endpoints
     
     @property
     def path(self):
-        return _absolute_path(self.raw.get('path'), self.base_dir)
+        return _absolute_path(self.raw.get('path'), self.dip.base_dir)
      
     @property
     def md5(self):
@@ -524,10 +589,87 @@ class DepositFile(object):
     
     @property
     def added(self):
-        return self.raw.get('added')
+        dt = datetime.datetime.strptime(self.raw.get('added'), "%Y-%m-%dT%H:%M:%SZ")
+        return dt
     
     @property
     def updated(self):
-        return self.raw.get('updated')
+        dt = datetime.datetime.strptime(self.raw.get('updated'), "%Y-%m-%dT%H:%M:%SZ")
+        return dt
+        
+    @property
+    def endpoints(self):
+        es = []
+        for e in self.raw.get('endpoints', []):
+            end = self.dip.get_endpoint(e['id'])
+            es.append(EndpointRecord(end, e['last_deposit']))
+        return es
+        
+    def get_endpoint_record(self, endpoint_id):
+        for e in self.raw.get('endpoints', []):
+            if e['id'] == endpoint_id:
+                end = self.dip.get_endpoint(endpoint_id)
+                return EndpointRecord(end, e['last_deposit'])
+        return None
+        
+    def _mark_deposited(self, endpoint_id, last_deposited=None):
+        if not self.raw.has_key('endpoints'):
+            self.raw['endpoints'] = []
+        
+        ld = None
+        if last_deposited is None:
+            ld = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        else:
+            if type(last_deposited) != str:
+                ld = last_deposited.strftime("%Y-%m-%dT%H:%M:%SZ")
+            else:
+                ld = last_deposited
+        
+        tripwire = False
+        for i in range(len(self.raw['endpoints'])):
+            if self.raw['endpoints'][i]['id'] == endpoint_id:
+                self.raw['endpoints'][i]['last_deposit'] = ld
+                tripwire = True
+                
+        if not tripwire:
+            e = self.dip.get_endpoint(endpoint_id)
+            if e is not None:
+                self.raw['endpoints'].append({ "id" : endpoint_id, "last_deposit" : ld})
+        
+        self.dip._save_deposit_info()
+
+class EndpointRecord(object):
+    def __init__(self, endpoint, last_deposit):
+        self.endpoint = endpoint
+        self._last_deposit = last_deposit
     
+    @property
+    def last_deposit(self):
+        dt = datetime.datetime.strptime(self._last_deposit, "%Y-%m-%dT%H:%M:%SZ")
+        return dt
+
+class DepositState(object):
+    OUT_OF_DATE = "out_of_date"
+    UP_TO_DATE = "up_to_date"
+    NOT_DEPOSITED = "not_deposited"
+    NO_ACTION = "no_action"
+
+    def __init__(self, dip):
+        self.dip = dip
+        self._states = []
+    
+    def add_state(self, state, deposit_file, endpoint_record):
+        self.states.append((state, deposit_file, endpoint_record))
+        
+    @property
+    def states(self):
+        return self._states
+    
+    def _lookup_states(self, file_path):
+        # does not normalise file paths, so don't use unless you know what you're doing
+        s = []
+        for state, deposit_file, endpoint_record in self.states:
+            if deposit_file.path == file_path:
+                s.append(state)
+        return s
     

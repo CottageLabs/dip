@@ -1,4 +1,4 @@
-import os, shutil, datetime
+import os, shutil, datetime, time
 from . import TestController
 import xml.etree.ElementTree as etree
 import dip
@@ -12,13 +12,30 @@ TESTFILE2_MD5 = "8a86db9c36f1f7a0d8905afe3649b886"
 class TestConnection(TestController):
     
     def _cleanup(self):
+        # cleanup the DIP directory
         if os.path.isdir(DIP_DIR):
             shutil.rmtree(DIP_DIR)
         elif os.path.isfile(DIP_DIR):
             os.remove(DIP_DIR)
+        
+        # some tests mess around with the test file resources, so straighten
+        # things out if necessary
+        temp = os.path.join(RESOURCES, "testfile.txt.bak")
+        if os.path.isfile(temp):
+            testfile = os.path.join(RESOURCES, "testfile.txt")
+            if os.path.isfile(testfile):
+                os.remove(testfile)
+            os.rename(temp, testfile)
     
     def _preserve_result(self):
         os.rename(DIP_DIR, PRES_DIR)
+    
+    def _update_file(self):
+        testfile = os.path.join(RESOURCES, "testfile.txt")
+        temp = os.path.join(RESOURCES, "testfile.txt.bak")
+        tf2 = os.path.join(RESOURCES, "testfile2.txt")
+        os.rename(testfile, temp)
+        shutil.copy(tf2, testfile)
     
     def setUp(self):
         self._cleanup()
@@ -345,21 +362,180 @@ class TestConnection(TestController):
         d.set_file(testfile)
         
         # now, let's exchange testfile.txt for testfile2.txt
-        temp = os.path.join(RESOURCES, "testfile.txt.bak")
-        tf2 = os.path.join(RESOURCES, "testfile2.txt")
-        os.rename(testfile, temp)
-        shutil.copy(tf2, testfile)
+        self._update_file()
         
         # now add the new file, and check that the item gets updated
         d.set_file(testfile)
-        
-        # before doing the assertions, switch the files back
-        os.remove(testfile)
-        os.rename(temp, testfile)
         
         # now make some assertions
         f = d.get_file(testfile)
         assert f.path == os.path.abspath(testfile)
         assert f.md5 == TESTFILE2_MD5
+    
+    def test_15_remove_file(self):
+        d = dip.DIP(DIP_DIR)
+        testfile = os.path.join(RESOURCES, "testfile.txt")
+        d.set_file(testfile)
         
+        assert len(d.get_files()) == 1
         
+        d.remove_file(testfile)
+        
+        assert len(d.get_files()) == 0
+        
+        d.set_file(testfile)
+        tf2 = os.path.join(RESOURCES, "testfile2.txt")
+        d.set_file(tf2)
+        
+        assert len(d.get_files()) == 2
+        
+        d.remove_file(tf2)
+        
+        fs = d.get_files()
+        assert len(fs) == 1
+        assert fs[0].path == os.path.abspath(testfile)
+        assert fs[0].md5 == TESTFILE_MD5
+        
+    def test_16_empty_deposit_state(self):
+        d = dip.DIP(DIP_DIR)
+        ds = d.get_state()
+        assert len(ds.states) == 0
+        
+    def test_17_ds_files_no_endpoints(self):
+        d = dip.DIP(DIP_DIR)
+        testfile = os.path.join(RESOURCES, "testfile.txt")
+        d.set_file(testfile)
+        tf2 = os.path.join(RESOURCES, "testfile2.txt")
+        d.set_file(tf2)
+        
+        ds = d.get_state()
+        assert len(ds.states) == 2, len(ds.states)
+        
+        # expected states:
+        # - 2 x NO_ACTION
+        for state, file_record, endpoint_record in ds.states:
+            assert state == dip.DepositState.NO_ACTION
+            assert endpoint_record is None
+        
+    def test_18_ds_endpoints_no_files(self):
+        d = dip.DIP(DIP_DIR)
+        e1 = dip.Endpoint(sd_iri="sd", col_iri="col", package="package", username="un", obo="obo")
+        d.set_endpoint(endpoint=e1)
+        e2 = dip.Endpoint(sd_iri="sd2", col_iri="col2", package="package2", username="un2", obo="obo2")
+        d.set_endpoint(endpoint=e2)
+        
+        ds = d.get_state()
+        assert len(ds.states) == 0        
+    
+    def test_19_ds_new_files_with_endpoints(self):
+        d = dip.DIP(DIP_DIR)
+        
+        testfile = os.path.join(RESOURCES, "testfile.txt")
+        d.set_file(testfile)
+        tf2 = os.path.join(RESOURCES, "testfile2.txt")
+        d.set_file(tf2)
+        
+        e1 = dip.Endpoint(sd_iri="sd", col_iri="col", package="package", username="un", obo="obo")
+        d.set_endpoint(endpoint=e1)
+        e2 = dip.Endpoint(sd_iri="sd2", col_iri="col2", package="package2", username="un2", obo="obo2")
+        d.set_endpoint(endpoint=e2)
+        
+        ds = d.get_state()
+        
+        # one state per endpoint
+        assert len(ds.states) == 4, len(ds.states)
+        
+        count = 0
+        for state, file_record, endpoint_record in ds.states:
+            if endpoint_record.endpoint.sd_iri == "sd":
+                if file_record.path == os.path.abspath(testfile):
+                    assert state == dip.DepositState.NOT_DEPOSITED
+                    count += 1
+                elif file_record.path == os.path.abspath(tf2):
+                    assert state == dip.DepositState.NOT_DEPOSITED
+                    count += 1
+            elif endpoint_record.endpoint.sd_iri == "sd2":
+                if file_record.path == os.path.abspath(testfile):
+                    assert state == dip.DepositState.NOT_DEPOSITED
+                    count += 1
+                elif file_record.path == os.path.abspath(tf2):
+                    assert state == dip.DepositState.NOT_DEPOSITED
+                    count += 1
+        # make sure we checked them all
+        assert count == 4
+    
+    def test_20_ds_modified_file_no_endpoints(self):
+        d = dip.DIP(DIP_DIR)
+        
+        testfile = os.path.join(RESOURCES, "testfile.txt")
+        d.set_file(testfile)
+        tf2 = os.path.join(RESOURCES, "testfile2.txt")
+        d.set_file(tf2)
+        
+        # we want to wait a moment to make sure that we can tell the difference between
+        # the added and updated timestamps
+        time.sleep(2)
+        
+        # now, let's update the first test file
+        self._update_file()
+        
+        ds = d.get_state()
+        
+        assert len(ds.states) == 2 # expect one state per file
+        
+        # now we expect the file records to have been updated
+        fr = d.get_file(testfile)
+        assert fr.path == os.path.abspath(testfile)
+        assert fr.md5 == TESTFILE2_MD5
+        assert fr.updated > fr.added
+        
+    def test_21_ds_modified_file_with_endpoints(self):
+        d = dip.DIP(DIP_DIR)
+        
+        testfile = os.path.join(RESOURCES, "testfile.txt")
+        d.set_file(testfile)
+        tf2 = os.path.join(RESOURCES, "testfile2.txt")
+        d.set_file(tf2)
+        
+        e1 = dip.Endpoint(sd_iri="sd", col_iri="col", package="package", username="un", obo="obo")
+        d.set_endpoint(endpoint=e1)
+        e2 = dip.Endpoint(sd_iri="sd2", col_iri="col2", package="package2", username="un2", obo="obo2")
+        d.set_endpoint(endpoint=e2)
+        
+        # now mark each of the files as being deposited into each of the endpoints
+        for fr in d.get_files():
+            fr._mark_deposited(e1.id)
+            fr._mark_deposited(e2.id)
+        
+        # we want to wait a moment to make sure that we can tell the difference between
+        # the added and updated timestamps
+        time.sleep(2)
+        
+        # now, let's update the first test file
+        self._update_file()
+        
+        ds = d.get_state()
+        
+        assert len(ds.states) == 4 # one per file per endpoint
+        
+        count = 0
+        for state, file_record, endpoint_record in ds.states:
+            if endpoint_record.endpoint.sd_iri == "sd":
+                if file_record.path == os.path.abspath(testfile):
+                    assert state == dip.DepositState.OUT_OF_DATE
+                    count += 1
+                elif file_record.path == os.path.abspath(tf2):
+                    assert state == dip.DepositState.UP_TO_DATE
+                    count += 1
+            elif endpoint_record.endpoint.sd_iri == "sd2":
+                if file_record.path == os.path.abspath(testfile):
+                    assert state == dip.DepositState.OUT_OF_DATE
+                    count += 1
+                elif file_record.path == os.path.abspath(tf2):
+                    assert state == dip.DepositState.UP_TO_DATE
+                    count += 1
+        # make sure we checked them all
+        assert count == 4
+        
+        self._preserve_result()
+    
