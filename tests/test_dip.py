@@ -1,6 +1,7 @@
 import os, shutil, datetime, time
 from . import TestController
-import xml.etree.ElementTree as etree
+#import xml.etree.ElementTree as etree
+from lxml import etree
 import dip
 
 DIP_DIR = "dip_test_dir"
@@ -28,7 +29,10 @@ class TestConnection(TestController):
             os.rename(temp, testfile)
     
     def _preserve_result(self):
-        os.rename(DIP_DIR, PRES_DIR)
+        if os.path.exists(PRES_DIR):
+            shutil.rmtree(PRES_DIR)
+        shutil.copytree(DIP_DIR, PRES_DIR)
+        # os.rename(DIP_DIR, PRES_DIR)
     
     def _update_file(self):
         testfile = os.path.join(RESOURCES, "testfile.txt")
@@ -537,5 +541,150 @@ class TestConnection(TestController):
         # make sure we checked them all
         assert count == 4
         
-        self._preserve_result()
+    def test_22_empty_dc(self):
+        d = dip.DIP(DIP_DIR)
+        
+        # check that there are currently no dc values, via direct access of the metadata file
+        mdfs = d.get_metadata_files()
+        assert len(mdfs) == 1
+        
+        # file path checks
+        p = mdfs[0].path
+        assert p.endswith("dcterms.xml")
+        
+        # check that the file is empty
+        with open(p) as f:
+           doc = etree.parse(f)
+        xml = doc.getroot()
+         
+        assert len(xml.getchildren()) == 0
+        
+    def test_23_add_dc(self):
+        d = dip.DIP(DIP_DIR)
+        
+        d.add_dublin_core("identifier", "123456")
+        d.add_dublin_core("title", "A title", "en")
+        d.add_dublin_core("title", "Titlen", "no")
+        d.add_dublin_core("creator", "Richard")
+        
+        mdfs = d.get_metadata_files()
+        assert len(mdfs) == 1
+        
+        mdf = d.get_metadata_file("dcterms")
+        assert mdf is not None
+        
+        # check that the file contains the correct xml
+        with open(mdf.path) as f:
+           doc = etree.parse(f)
+        xml = doc.getroot()
+        
+        assert len(xml.getchildren()) == 4
+        
+        count = 0
+        for child in xml:
+            if child.tag.endswith("identifier"):
+                assert child.text == "123456"
+                count += 1
+            if child.tag.endswith("title"):
+                if child.get("{http://www.w3.org/XML/1998/namespace}lang") == "en":
+                    assert child.text == "A title"
+                    count += 1
+                if child.get("{http://www.w3.org/XML/1998/namespace}lang") == "no":
+                    assert child.text == "Titlen"
+                    count += 1
+            if child.tag.endswith("creator"):
+                assert child.text == "Richard"
+                count += 1
+        assert count == 4, count
+        
+    def test_24_add_retrieve_dc(self):
+        # add dc values and then retrieve through the get_dc method
+        d = dip.DIP(DIP_DIR)
+        
+        d.add_dublin_core("identifier", "123456")
+        d.add_dublin_core("title", "A title", "en")
+        d.add_dublin_core("title", "Titlen", "no")
+        d.add_dublin_core("creator", "Richard")
+        
+        # try to get all the dc values
+        a = d.get_dublin_core()
+        assert len(a) == 4
+        count = 0
+        for dcterm, value, lang in a:
+            if dcterm == "identifier":
+                assert value == "123456"
+                assert lang is None
+                count += 1
+            if dcterm == "title":
+                if lang == "en":
+                    assert value == "A title"
+                    count += 1
+                elif lang == "no":
+                    assert value == "Titlen"
+                    count += 1
+            if dcterm == "creator":
+                assert value == "Richard"
+                assert lang is None
+                count += 1
+        assert count ==  4, count
+        
+        # now try to get them individually
+        b = d.get_dublin_core("identifier")
+        assert len(b) == 1
+        assert b[0][0] == "identifier", b[0]
+        assert b[0][1] == "123456"
+        assert b[0][2] is None
+        
+        c = d.get_dublin_core("title", None, "en")
+        assert len(c) == 1
+        assert c[0][0] == "title"
+        assert c[0][1] == "A title"
+        assert c[0][2] == "en"
+        
+        e = d.get_dublin_core(dcterm="title", lang="no")
+        assert len(e) == 1
+        
+        f = d.get_dublin_core(value="Richard")
+        assert len(f) == 1
     
+    def test_25_add_remove_dc(self):
+        d = dip.DIP(DIP_DIR)
+        
+        d.add_dublin_core("identifier", "123456")
+        d.add_dublin_core("title", "A title", "en")
+        d.add_dublin_core("title", "Titlen", "no")
+        d.add_dublin_core("creator", "Richard")
+        
+        # try to get all the dc values
+        a = d.get_dublin_core()
+        assert len(a) == 4
+        
+        # now remove one of the values
+        d.remove_dublin_core("identifier")
+        
+        a = d.get_dublin_core()
+        assert len(a) == 3
+        for dcterm, value, lang in a:
+            assert dcterm in ["title", "creator"]
+        
+        # now remove another value by two fields
+        d.remove_dublin_core(dcterm="title", lang="en")
+        
+        a = d.get_dublin_core()
+        assert len(a) == 2
+        for dcterm, value, lang in a:
+            assert lang in [None, "no"]
+        
+        # and another by value
+        d.remove_dublin_core(value="Richard")
+        
+        a = d.get_dublin_core()
+        assert len(a) == 1
+        assert a[0][0] == "title"
+        assert a[0][1] == "Titlen"
+        assert a[0][2] == "no"
+        
+        # finally remove all remaining dublin core
+        d.remove_dublin_core()
+        a = d.get_dublin_core()
+        assert len(a) == 0

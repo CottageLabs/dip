@@ -1,5 +1,6 @@
-import os, datetime, json, uuid, hashlib, logging
-import xml.etree.ElementTree as etree
+import os, datetime, json, uuid, hashlib, logging, sword2
+# import xml.etree.ElementTree as etree
+from lxml import etree
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ class DIP(object):
         self._guarantee_directory(metadata_dir)
         
         # load the dublin core (which will initialise if necessary)
+        self.nsmap = {"dcterms" : "http://purl.org/dc/terms/", "xml" : "http://www.w3.org/XML/1998/namespace"}
         self._load_dc()
     
     @property
@@ -137,7 +139,7 @@ class DIP(object):
                 return Endpoint(raw=e)
         return None
     
-    def set_endpoint(self, endpoint=None, id=None, sd_iri=None, col_iri=None, package=None, username=None, obo=None):
+    def set_endpoint(self, endpoint=None, id=None, sd_iri=None, col_iri=None, edit_iri=None, package=None, username=None, obo=None):
         """
         Set the endpoint with the details provided.  There are 2 modes of operation:
         
@@ -171,7 +173,7 @@ class DIP(object):
         if endpoint is None:
             if sd_iri is None:
                 raise InitialiseException("attempt to set endpoint without sd_iri - this is required")
-            endpoint = Endpoint(sd_iri=sd_iri, col_iri=col_iri, package=package, username=username, obo=obo, id=id)
+            endpoint = Endpoint(sd_iri=sd_iri, col_iri=col_iri, edit_iri=edit_iri, package=package, username=username, obo=obo, id=id)
         
         # validate the sd_iri of the supplied endpoint
         if endpoint.sd_iri is None:
@@ -240,9 +242,19 @@ class DIP(object):
         """
         get a list of MetadataFile objects currently part of this DIP
         """
-        pass
+        files = []
+        for fr in self.deposit_info_raw['metadata']:
+            files.append(MetadataFile(self, raw=fr))
+        return files
         
-    def add_metadata_file(self, md_format, path=None, string=None):
+    def get_metadata_file(self, md_format):
+        # now find out if we already have a record for that file
+        for fr in self.deposit_info_raw['metadata']:
+            if fr['format'] == md_format:
+                return MetadataFile(self, raw=fr)
+        return None
+        
+    def add_metadata_file(self, md_format, path=None, string=None, deposit_includes_root=True):
         """
         Add a metadata file or string by-value to the DIP
         
@@ -252,6 +264,8 @@ class DIP(object):
         Keyword Arguments:
         path    -   path to the metadata file
         string  -   full string value of the contents of the metadata file
+        deposit_includes_root    -   whether to include the metadata in whole (including the root) into a metadata-only deposit, or 
+                                    just the children of the root
         
         You should only supply one of "path" or "string".  If both are provided, the
         "path" will take precedence
@@ -269,7 +283,11 @@ class DIP(object):
         Keyword Arguments:
         lang    -   The language of the value
         """
-        pass
+        element = etree.SubElement(self._dc_xml, "{" + self.nsmap["dcterms"] + "}" + dcterm, nsmap=self.nsmap)
+        if lang is not None:
+            element.set("{" + self.nsmap["xml"] + "}lang", lang)
+        element.text = value
+        self._save_dc()
         
     def remove_dublin_core(self, dcterm=None, value=None, lang=None):
         """
@@ -281,14 +299,41 @@ class DIP(object):
         value   -   The string value to put in the field
         lang    -   The language of the value
         """
-        pass
+        # locate removable elements
+        elements = []
+        for element in self.dc_xml:
+            match_dcterm = True if dcterm is None else "{" + self.nsmap["dcterms"] + "}" + dcterm == element.tag
+            match_value = True if value is None else element.text.strip() == value
+            match_lang = True if lang is None else element.get("{" + self.nsmap["xml"] + "}lang") == lang
+            
+            if match_dcterm and match_value and match_lang:
+                elements.append(element)
+        
+        # now remove each element from the dc xml
+        for element in elements:
+            self.dc_xml.remove(element)
         
     def get_dublin_core(self, dcterm=None, value=None, lang=None):
         """
         Get a list of of any Dublin Core values which match the parameters provided.
         Leaving a keyword set to None is a wildcard which will match anything.
+        
+        Returns an array of tuples of the form
+        
+            (dcterm, value, lang)
+        
         """
-        pass
+        dcs = []
+        
+        for element in self.dc_xml:
+            match_dcterm = True if dcterm is None else "{" + self.nsmap["dcterms"] + "}" + dcterm == element.tag
+            match_value = True if value is None else element.text.strip() == value
+            match_lang = True if lang is None else element.get("{" + self.nsmap["xml"] + "}lang") == lang
+            
+            if match_dcterm and match_value and match_lang:
+                dcs.append((element.tag[len("{" + self.nsmap["dcterms"] + "}"):], element.text.strip(), element.get("{" + self.nsmap["xml"] + "}lang")))
+        
+        return dcs
         
     def get_state(self):
         """
@@ -352,14 +397,23 @@ class DIP(object):
         """
         return ds
         
-    def deposit(self, endpoint_id):
+    def deposit(self, endpoint_id, metadata_only=False, metadata_format="dcterms"):
         """
         Carry out a deposit (create or update) operation of the DIP to the specified
         endpoint.
         
         Returns a tuple: (ResponseMeta, sword2.DepositReceipt)
         """
-        pass
+        endpoint = self.get_endpoint(endpoint_id)
+        
+        # deposit can only go ahead if we have the sd_iri and the col_iri
+        if endpoint.sd_iri is None or endpoint.col_iri is None:
+            raise DepositException("Endpoint " + endpoint.id + " does not have a Service Document IRI and/or a Collection IRI; deposit cannot proceed")
+        
+        if metadata_only:
+            return self._deposit_metadata(endpoint, metadata_format)
+        else:
+            return self._deposit_binary(endpoint)
         
     def delete(self, endpoint_id):
         """
@@ -397,10 +451,10 @@ class DIP(object):
             "metadata" : [
                 {
                     "path" : "metadata/dcterms.xml",
+                    "include_root": False,
                     "format" : "dcterms",
                     "added" : n,
-                    "modified" : n,
-                    "endpoints" : []
+                    "modified" : n
                 }
             ]
         }
@@ -464,7 +518,13 @@ class DIP(object):
         with open(dcterms_file) as f:
             doc = etree.parse(f)
             self._dc_xml = doc.getroot()
-            
+    
+    def _get_xml(self, xml_file):
+         with open(xml_file) as f:
+            doc = etree.parse(f)
+         xml = doc.getroot()
+         return xml
+    
     def _update_file_record(self, record):
         path = _absolute_path(record['path'], self.base_dir)
         with open(path) as f:
@@ -485,7 +545,49 @@ class DIP(object):
             "updated" : n,
         }
         self.deposit_info_raw['files'].append(record)
-        self._save_deposit_info()    
+        self._save_deposit_info()
+    
+    def _deposit_metadata(endpoint, metadata_format="dcterms", user_pass=None):
+        # get the xml metadata
+        mdf = self.get_metadata_file(metadata_format)
+        if not mdf.path.endswith(".xml"):
+            raise DepositException("can't do a metadata only deposit on a non-xml formatted metadata file")
+        xml = self._get_xml(mdf.path)
+        
+        # create a new sword2 Entry document for deposit
+        e = sword2.Entry()
+        
+        # there are two options for metadata deposit:
+        # - the whole xml document including the root embedded into the entry doc
+        # - the children of the root xml document embedded into the entry doc
+        if mdf.include_root:
+            e.entry.append(xml)
+        else:
+            for child in xml.getchildren():
+                e.entry.append(child)
+        
+        # set up a request record object
+        request_record = CommsMeta(self, request=True)
+        
+        # construct a new connection object around the Service Document identifier
+        conn = sword2.Connection(endpoint.sd_iri, user_name=endpoint.username, user_pass=user_pass, on_behalf_of=endpoint.obo)
+        
+        # now determine if we are going to do a create or an update
+        if endpoint.edit_iri is not None:
+            # it's an update
+            pass
+        else:
+            # we are creating a new record
+            request_record.request_url = endpoint.col_iri
+            request_record.method = "POST"
+            request_record.headers
+            receipt = conn.create(col_iri=endpoint.col_iri, metadata_entry=e)
+            endpoint.edit_iri = receipt.location
+            self._save_deposit_info()
+        
+    
+    def _deposit_binary(endpoint):
+        pass 
             
 class InitialiseException(Exception):
     """
@@ -498,8 +600,19 @@ class InitialiseException(Exception):
     def __str__(self):
         return repr(self.message)
         
+class DepositException(Exception):
+    """
+    Exception to be thrown if the initialisation of a DIP fails
+    """
+    def __init__(self, message):
+        super(DepositException, self).__init__(self)
+        self.message = message
+    
+    def __str__(self):
+        return repr(self.message)
+        
 class Endpoint(object):
-    def __init__(self, raw=None, sd_iri=None, col_iri=None, package=None, username=None, obo=None, id=None):
+    def __init__(self, raw=None, sd_iri=None, col_iri=None, edit_iri=None, package=None, username=None, obo=None, id=None):
         if raw is not None:
             self.raw = raw
         else:
@@ -508,6 +621,8 @@ class Endpoint(object):
                 self.raw['sd_iri'] = sd_iri
             if col_iri is not None:
                 self.raw['col_iri'] = col_iri
+            if edit_iri is not None:
+                self.raw['edit_iri'] = edit_iri
             if package is not None:
                 self.raw['package'] = package
             if username is not None:
@@ -539,7 +654,15 @@ class Endpoint(object):
     @col_iri.setter
     def col_iri(self, value):
         self.raw['col_iri'] = value
-        
+    
+    @property
+    def edit_iri(self):
+        return self.raw.get('edit_iri')
+    
+    @edit_iri.setter
+    def edit_iri(self, value):
+        self.raw['edit_iri'] = value
+    
     @property
     def package(self):
         return self.raw.get('package')
@@ -582,10 +705,80 @@ class DepositFile(object):
     @property
     def path(self):
         return _absolute_path(self.raw.get('path'), self.dip.base_dir)
-     
+    
     @property
     def md5(self):
         return self.raw.get('md5')
+    
+    @property
+    def added(self):
+        dt = datetime.datetime.strptime(self.raw.get('added'), "%Y-%m-%dT%H:%M:%SZ")
+        return dt
+    
+    @property
+    def updated(self):
+        dt = datetime.datetime.strptime(self.raw.get('updated'), "%Y-%m-%dT%H:%M:%SZ")
+        return dt
+        
+    @property
+    def endpoints(self):
+        es = []
+        for e in self.raw.get('endpoints', []):
+            end = self.dip.get_endpoint(e['id'])
+            es.append(EndpointRecord(end, e['last_deposit']))
+        return es
+        
+    def get_endpoint_record(self, endpoint_id):
+        for e in self.raw.get('endpoints', []):
+            if e['id'] == endpoint_id:
+                end = self.dip.get_endpoint(endpoint_id)
+                return EndpointRecord(end, e['last_deposit'])
+        return None
+        
+    def _mark_deposited(self, endpoint_id, last_deposited=None):
+        if not self.raw.has_key('endpoints'):
+            self.raw['endpoints'] = []
+        
+        ld = None
+        if last_deposited is None:
+            ld = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        else:
+            if type(last_deposited) != str:
+                ld = last_deposited.strftime("%Y-%m-%dT%H:%M:%SZ")
+            else:
+                ld = last_deposited
+        
+        tripwire = False
+        for i in range(len(self.raw['endpoints'])):
+            if self.raw['endpoints'][i]['id'] == endpoint_id:
+                self.raw['endpoints'][i]['last_deposit'] = ld
+                tripwire = True
+                
+        if not tripwire:
+            e = self.dip.get_endpoint(endpoint_id)
+            if e is not None:
+                self.raw['endpoints'].append({ "id" : endpoint_id, "last_deposit" : ld})
+        
+        self.dip._save_deposit_info()
+
+class MetadataFile(object):
+    def __init__(self, dip, raw={}):
+        self.dip = dip
+        self.raw = raw
+        
+    # path, format, added, updated, endpoints, include_root
+    
+    @property
+    def path(self):
+        return _absolute_path(self.raw.get('path'), self.dip.base_dir)
+    
+    @property
+    def include_root(self):
+        return self.raw.get('include_root', True)
+    
+    @property
+    def format(self):
+        return self.raw.get('format')
     
     @property
     def added(self):
@@ -672,4 +865,136 @@ class DepositState(object):
             if deposit_file.path == file_path:
                 s.append(state)
         return s
+        
+class CommsMeta(object):
+    def __init__(self, dip, request=False, response=False, meta_file=None, raw=None, body_file=None):
+        # remember the DIP and the request/response flags
+        self.dip = dip
+        self.request = request
+        self.response = response
+        
+        # if we are given a meta file and it exists, load from it
+        if meta_file is not None and os.path.isfile(meta_file):
+            with open(meta_file) as f:
+                raw = json.loads(f.read())
+            self.meta_file = meta_file
+        if raw is None:
+            raise InitialiseException("Can't initialise a ResponseMeta object without either a path to the meta file or the raw json")
+        self._raw = raw
+        
+        # if we are not given a meta file, designate a path for it
+        if meta_file is None:
+            self.raw['timestamp'], self.meta_file = self._meta_file_init()
+            
+        # if we are given a meta file and it does not exist, do nothing
+        if meta_file is not None and not os.path.isfile(meta_file):
+            self.meta_file = meta_file
+        
+        # record the location of the body file
+        self.body_file = body_file
+    
+    @property
+    def timestamp(self):
+        return self._raw.get('timestamp')
+    
+    @timestamp.setter
+    def timestamp(self, value):
+        self._raw['timestamp'] = value
+        
+    @property
+    def method(self):
+        return self._raw.get('method')
+    
+    @method.setter
+    def method(self, value):
+        self._raw['method'] = value
+    
+    @property
+    def request_url(self):
+        return self._raw.get('request_url')
+    
+    @request_url.setter
+    def request_url(self, value):
+        self._raw['request_url'] = value
+    
+    @property
+    def response_code(self):
+        return self._raw.get('response_code')
+    
+    @response_code.setter
+    def response_code(self, value):
+        self._raw['response_code'] = value
+    
+    @property
+    def username(self):
+        return self._raw.get('username')
+    
+    @username.setter
+    def username(self, value):
+        self._raw['username'] = value
+    
+    @property
+    def on_behalf_of(self):
+        return self._raw.get("on-behalf-of")
+    
+    @on_behalf_of.setter
+    def on_behalf_of(self, value):
+        self._raw["on-behalf-of"] = value
+    
+    @property
+    def auth_type(self):
+        return self._raw.get("auth_type")
+    
+    @auth_type.setter
+    def auth_type(self, value):
+        self._raw['auth_type'] = value
+    
+    @property
+    def headers(self):
+        if not self._raw.has_key('headers'):
+            self._raw['headers'] = {}
+        return self._raw.get('headers')
+    
+    def save(self):
+        with open(self.meta_file, "wb") as f:
+            f.write(json.dumps(self._raw))
+            
+    def _meta_file_init(self):
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        req_resp = "request" if self.request else "response"
+        path = os.path.join(self.dip.base_dir, timestamp + "_" + req_resp + "_meta.json")
+        return timestamp, path
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     
