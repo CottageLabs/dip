@@ -287,6 +287,8 @@ class DIP(object):
         if lang is not None:
             element.set("{" + self.nsmap["xml"] + "}lang", lang)
         element.text = value
+        
+        # save the changes
         self._save_dc()
         
     def remove_dublin_core(self, dcterm=None, value=None, lang=None):
@@ -312,6 +314,9 @@ class DIP(object):
         # now remove each element from the dc xml
         for element in elements:
             self.dc_xml.remove(element)
+        
+        # save the changes
+        self._save_dc()
         
     def get_dublin_core(self, dcterm=None, value=None, lang=None):
         """
