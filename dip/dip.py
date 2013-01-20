@@ -873,34 +873,44 @@ class DepositState(object):
         
 class CommsMeta(object):
     def __init__(self, dip, request=False, response=False, meta_file=None, raw=None, body_file=None):
+    
+        if meta_file is None and raw is None:
+            raise InitialiseException("Can't initialise a CommsMeta object without either a path to the meta file or the raw json")
+    
+        if (not request and not response) or (request and response):
+            raise InitialiseException("Can't initialise a CommsMeta object without exactly one of 'request' or 'response' set to true")
+    
+        # if we are given a meta file and it exists, load from it
+        if meta_file is not None and os.path.isfile(meta_file):
+            with open(meta_file) as f:
+                raw = json.loads(f.read())
+        
+        # if, by this point, we still don't have a raw object, make a blank one    
+        if raw is None:
+            raw = {}
+    
+        # assign the internal raw object
+        self._raw = raw
+    
         # remember the DIP and the request/response flags
         self.dip = dip
         self.request = request
         self.response = response
         
-        # if we are given a meta file and it exists, load from it
-        if meta_file is not None and os.path.isfile(meta_file):
-            with open(meta_file) as f:
-                raw = json.loads(f.read())
-            self.meta_file = meta_file
-        if raw is None:
-            raise InitialiseException("Can't initialise a ResponseMeta object without either a path to the meta file or the raw json")
-        self._raw = raw
-        
         # if we are not given a meta file, designate a path for it
         if meta_file is None:
-            self.raw['timestamp'], self.meta_file = self._meta_file_init()
-            
-        # if we are given a meta file and it does not exist, do nothing
-        if meta_file is not None and not os.path.isfile(meta_file):
+            self._raw['timestamp'], self.meta_file = self._meta_file_init()
+        else:
             self.meta_file = meta_file
         
+        # FIXME: this isn't properly thought through yet
         # record the location of the body file
         self.body_file = body_file
     
     @property
     def timestamp(self):
-        return self._raw.get('timestamp')
+        dt = datetime.datetime.strptime(self._raw.get('timestamp'), "%Y-%m-%dT%H:%M:%SZ")
+        return dt
     
     @timestamp.setter
     def timestamp(self, value):
@@ -939,14 +949,6 @@ class CommsMeta(object):
         self._raw['username'] = value
     
     @property
-    def on_behalf_of(self):
-        return self._raw.get("on-behalf-of")
-    
-    @on_behalf_of.setter
-    def on_behalf_of(self, value):
-        self._raw["on-behalf-of"] = value
-    
-    @property
     def auth_type(self):
         return self._raw.get("auth_type")
     
@@ -967,7 +969,7 @@ class CommsMeta(object):
     def _meta_file_init(self):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
         req_resp = "request" if self.request else "response"
-        path = os.path.join(self.dip.base_dir, timestamp + "_" + req_resp + "_meta.json")
+        path = os.path.join(self.dip.base_dir, "history", timestamp + "_" + req_resp + "_meta.json")
         return timestamp, path
 
 

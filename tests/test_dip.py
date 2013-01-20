@@ -688,3 +688,100 @@ class TestConnection(TestController):
         d.remove_dublin_core()
         a = d.get_dublin_core()
         assert len(a) == 0
+        
+    def test_26_comms_meta_init(self):
+        d = dip.DIP(DIP_DIR)
+        
+        # an error because we don't provide meta_file or raw
+        with self.assertRaises(dip.InitialiseException):
+            cm = dip.CommsMeta(d, request=True)
+        
+        # an error because we don't provide request or response
+        with self.assertRaises(dip.InitialiseException):
+            cm = dip.CommsMeta(d, raw={})
+        
+        # several potentially successful inits
+        cm = dip.CommsMeta(d, response=True, raw={})
+        cm = dip.CommsMeta(d, request=True, meta_file=os.path.join(RESOURCES, "testmeta.json"))
+    
+    def test_27_comms_meta_properties(self):
+        d = dip.DIP(DIP_DIR)
+        
+        # a basic comms meta object
+        cm = dip.CommsMeta(d, response=True, raw={})
+        
+        # all the properties should be None (except timestamp)
+        assert cm.timestamp is not None
+        assert cm.method is None
+        assert cm.request_url is None
+        assert cm.response_code is None
+        assert cm.username is None
+        assert cm.auth_type is None
+        assert len(cm.headers.keys()) == 0
+        
+        cm = dip.CommsMeta(d, request=True, meta_file=os.path.join(RESOURCES, "testmeta.json"))
+        
+        # all the properties should be set
+        assert cm.timestamp == datetime.datetime.strptime("2013-01-01T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
+        assert cm.method == "POST"
+        assert cm.request_url == "http://testurl"
+        assert cm.response_code == 200
+        assert cm.username == "richard"
+        assert cm.auth_type == "Basic"
+        assert len(cm.headers.keys()) == 9
+        assert cm.headers['On-Behalf-Of'] == "obo"
+        
+    def test_28_comms_meta_file(self):
+        d = dip.DIP(DIP_DIR)
+        
+        # create one without a file, and see if we can create it
+        cm = dip.CommsMeta(d, request=True, raw={})
+        
+        # check that we've got the right file path
+        ts = datetime.datetime.strftime(cm.timestamp, "%Y-%m-%dT%H:%M:%SZ")
+        assert cm.meta_file == os.path.join(d.base_dir, "history", ts + "_request_meta.json")
+        
+        # save the new file
+        cm.save()
+        
+        print cm.meta_file
+        
+        # now load from that file
+        cm2 = dip.CommsMeta(d, request=True, meta_file=cm.meta_file)
+        
+        # none of the properties are set yet
+        assert cm2.timestamp == cm.timestamp
+        assert cm2.method is None
+        assert cm2.request_url is None
+        assert cm2.response_code is None
+        assert cm2.username is None
+        assert cm2.auth_type is None
+        assert len(cm.headers.keys()) == 0
+        
+        # now set some properties
+        cm2.method = "PUT"
+        cm2.request_url = "http://request"
+        cm2.response_code = 201
+        cm2.username = "bob"
+        cm2.auth_type = "Basic"
+        cm2.headers["Content-Type"] = "application/zip"
+        cm2.headers["On-Behalf-Of"] = "obo"
+        
+        # now save again
+        cm2.save()
+        
+        cm3 = dip.CommsMeta(d, request=True, meta_file=cm.meta_file)
+        
+        # now check the properties have come back
+        assert cm3.timestamp == cm.timestamp
+        assert cm3.method == "PUT"
+        assert cm3.request_url == "http://request"
+        assert cm3.response_code == 201
+        assert cm3.username == "bob"
+        assert cm3.auth_type == "Basic"
+        assert len(cm3.headers.keys()) == 2
+        assert cm3.headers['On-Behalf-Of'] == "obo"
+        assert cm3.headers['Content-Type'] == "application/zip"
+
+        self._preserve_result()
+

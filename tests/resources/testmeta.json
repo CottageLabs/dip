@@ -1,0 +1,19 @@
+{
+    "timestamp" : "2013-01-01T00:00:00Z",
+    "method" : "POST",
+    "request_url" : "http://testurl",
+    "response_code" : 200,
+    "username" : "richard",
+    "auth_type" : "Basic",
+    "headers" : {
+        "On-Behalf-Of" : "obo",
+        "Content-Type" : "application/zip",
+        "Content-Length" : "345",
+        "Content-MD5" : "1234567890",
+        "Content-Disposition" : "whatever",
+        "Packaging" : "http://purl.org/net/packaging/SimpleZip",
+        "In-Progress" : "True",
+        "Slug" : "1234567",
+        "Location" : "http://location"
+    }
+}
