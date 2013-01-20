@@ -409,6 +409,7 @@ class DIP(object):
         
         Returns a tuple: (ResponseMeta, sword2.DepositReceipt)
         """
+        # FIXME: need to support pass-through of sword2 client library arguments
         endpoint = self.get_endpoint(endpoint_id)
         
         # deposit can only go ahead if we have the sd_iri and the col_iri
@@ -572,7 +573,9 @@ class DIP(object):
                 e.entry.append(child)
         
         # set up a request record object
-        request_record = CommsMeta(self, request=True)
+        request_record = CommsMeta(self, endpoint, type="request", username=endpoint.username)
+        if endpoint.obo is not None:
+            request_record.headers['On-Behalf-Of'] = endpoint.obo
         
         # construct a new connection object around the Service Document identifier
         conn = sword2.Connection(endpoint.sd_iri, user_name=endpoint.username, user_pass=user_pass, on_behalf_of=endpoint.obo)
@@ -585,7 +588,6 @@ class DIP(object):
             # we are creating a new record
             request_record.request_url = endpoint.col_iri
             request_record.method = "POST"
-            request_record.headers
             receipt = conn.create(col_iri=endpoint.col_iri, metadata_entry=e)
             endpoint.edit_iri = receipt.location
             self._save_deposit_info()
@@ -872,18 +874,53 @@ class DepositState(object):
         return s
         
 class CommsMeta(object):
-    def __init__(self, dip, request=False, response=False, meta_file=None, raw=None, body_file=None):
-    
-        if meta_file is None and raw is None:
-            raise InitialiseException("Can't initialise a CommsMeta object without either a path to the meta file or the raw json")
-    
-        if (not request and not response) or (request and response):
-            raise InitialiseException("Can't initialise a CommsMeta object without exactly one of 'request' or 'response' set to true")
-    
+    request = "request"
+    response = "response"
+
+    def __init__(self, dip, endpoint, meta_file=None, raw=None, body_file=None,
+                    timestamp=None, type=None, method=None, request_url=None, response_code=None,
+                    username=None, auth_type=None, headers=None):
+        """
+        Construct a new CommsMeta object.
+        
+        Required Arguments:
+        dip         - an instance of a DIP object
+        endpoint    - an instance of an endpoint object from the provided DIP, to which this CommsMeta record pertains
+        
+        Optional Arguments:
+        meta_file   - the file where the contents of this CommsMeta object are/should be stored.
+                        if the file exists, the object will load its properties from there.  If it
+                        does not exist, it will be created when the object is saved
+        raw         - the raw python dictionary object to seed this object.  Must conform to the 
+                        specification of the raw dictionary, so probably best not to do this yourself
+        body_file   - the file where the associated body content for this communication can be found
+        
+        The following arguments, if provided, will override any equivalent arguments provided in the
+        meta file itself, or in the raw dictionary object if provided.  So use with caution
+        timestamp   - time of this communication (for request or response)
+        type        - type of communication, one of "request" or "response"
+        method      - HTTP method (for request or response)
+        request_url - URL the request is being made to (for request or response)
+        response_code   - numeric code of response (response only)
+        username    - username used for authentication (request only)
+        auth_type   - HTTP authentication method used (request only)
+        headers     - a dictionary of provided or received HTTP headers (for request or response)
+        """
+        #if meta_file is None and raw is None:
+        #    raise InitialiseException("Can't initialise a CommsMeta object without either a path to the meta file or the raw json")
+        
+        # remember the DIP and endpoint
+        self.dip = dip
+        self.endpoint = endpoint
+        
         # if we are given a meta file and it exists, load from it
-        if meta_file is not None and os.path.isfile(meta_file):
-            with open(meta_file) as f:
-                raw = json.loads(f.read())
+        if meta_file is not None:
+            if os.path.isfile(meta_file):
+                with open(meta_file) as f:
+                    raw = json.loads(f.read())
+                self.meta_file = meta_file
+            else:
+                raise InitialiseException("Supplied meta_file is a directory not a file")
         
         # if, by this point, we still don't have a raw object, make a blank one    
         if raw is None:
@@ -891,12 +928,17 @@ class CommsMeta(object):
     
         # assign the internal raw object
         self._raw = raw
-    
-        # remember the DIP and the request/response flags
-        self.dip = dip
-        self.request = request
-        self.response = response
         
+        # if we have been given object arguments in the constructor, record them
+        if timestamp is not None: self.timestamp = timestamp
+        if type is not None: self._raw['type'] = type
+        if method is not None: self.method = method
+        if request_url is not None: self.request_url = request_url
+        if response_code is not None: self.response_code = response_code
+        if username is not None: self.username = username
+        if auth_type is not None: self.auth_type = auth_type
+        if headers is not None: self.headers = headers
+    
         # if we are not given a meta file, designate a path for it
         if meta_file is None:
             self._raw['timestamp'], self.meta_file = self._meta_file_init()
@@ -915,7 +957,19 @@ class CommsMeta(object):
     @timestamp.setter
     def timestamp(self, value):
         self._raw['timestamp'] = value
-        
+    
+    @property
+    def type(self):
+        return self._raw.get('type')
+    
+    @type.setter
+    def type(self, value):
+        allowed = [CommsMeta.request, CommsMeta.response]
+        if value not in allowed:
+            raise InitialiseException("Type must be one of: " + str(allowed))
+        self._raw['type'] = value
+        _, self.meta_file = self._meta_file_init()
+    
     @property
     def method(self):
         return self._raw.get('method')
@@ -961,15 +1015,22 @@ class CommsMeta(object):
         if not self._raw.has_key('headers'):
             self._raw['headers'] = {}
         return self._raw.get('headers')
+        
+    @headers.setter
+    def headers(self, value):
+        self._raw['headers'] = value
     
     def save(self):
+        parent = os.path.dirname(self.meta_file)
+        if not os.path.isdir(parent):
+            os.makedirs(parent)
         with open(self.meta_file, "wb") as f:
             f.write(json.dumps(self._raw))
             
     def _meta_file_init(self):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
-        req_resp = "request" if self.request else "response"
-        path = os.path.join(self.dip.base_dir, "history", timestamp + "_" + req_resp + "_meta.json")
+        req_resp = self.type if self.type is not None else "unknown"
+        path = os.path.join(self.dip.base_dir, "history", self.endpoint.id, timestamp + "_" + req_resp + "_meta.json")
         return timestamp, path
 
 

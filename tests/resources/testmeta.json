@@ -5,6 +5,7 @@
     "response_code" : 200,
     "username" : "richard",
     "auth_type" : "Basic",
+    "type" : "request",
     "headers" : {
         "On-Behalf-Of" : "obo",
         "Content-Type" : "application/zip",

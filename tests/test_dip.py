@@ -692,23 +692,21 @@ class TestConnection(TestController):
     def test_26_comms_meta_init(self):
         d = dip.DIP(DIP_DIR)
         
-        # an error because we don't provide meta_file or raw
-        with self.assertRaises(dip.InitialiseException):
-            cm = dip.CommsMeta(d, request=True)
-        
-        # an error because we don't provide request or response
-        with self.assertRaises(dip.InitialiseException):
-            cm = dip.CommsMeta(d, raw={})
+        e1 = dip.Endpoint(sd_iri="sd", col_iri="col", package="package", username="un", obo="obo")
+        d.set_endpoint(endpoint=e1)
         
         # several potentially successful inits
-        cm = dip.CommsMeta(d, response=True, raw={})
-        cm = dip.CommsMeta(d, request=True, meta_file=os.path.join(RESOURCES, "testmeta.json"))
+        cm = dip.CommsMeta(d, e1, raw={})
+        cm = dip.CommsMeta(d, e1, meta_file=os.path.join(RESOURCES, "testmeta.json"))
     
     def test_27_comms_meta_properties(self):
         d = dip.DIP(DIP_DIR)
         
+        e1 = dip.Endpoint(sd_iri="sd", col_iri="col", package="package", username="un", obo="obo")
+        d.set_endpoint(endpoint=e1)
+        
         # a basic comms meta object
-        cm = dip.CommsMeta(d, response=True, raw={})
+        cm = dip.CommsMeta(d, e1)
         
         # all the properties should be None (except timestamp)
         assert cm.timestamp is not None
@@ -719,7 +717,7 @@ class TestConnection(TestController):
         assert cm.auth_type is None
         assert len(cm.headers.keys()) == 0
         
-        cm = dip.CommsMeta(d, request=True, meta_file=os.path.join(RESOURCES, "testmeta.json"))
+        cm = dip.CommsMeta(d, e1, meta_file=os.path.join(RESOURCES, "testmeta.json"))
         
         # all the properties should be set
         assert cm.timestamp == datetime.datetime.strptime("2013-01-01T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
@@ -728,18 +726,22 @@ class TestConnection(TestController):
         assert cm.response_code == 200
         assert cm.username == "richard"
         assert cm.auth_type == "Basic"
-        assert len(cm.headers.keys()) == 9
+        assert len(cm.headers.keys()) == 9, cm.headers.keys()
         assert cm.headers['On-Behalf-Of'] == "obo"
         
     def test_28_comms_meta_file(self):
         d = dip.DIP(DIP_DIR)
         
+        e1 = dip.Endpoint(sd_iri="sd", col_iri="col", package="package", username="un", obo="obo")
+        d.set_endpoint(endpoint=e1)
+        
         # create one without a file, and see if we can create it
-        cm = dip.CommsMeta(d, request=True, raw={})
+        cm = dip.CommsMeta(d, e1, type="request")
         
         # check that we've got the right file path
         ts = datetime.datetime.strftime(cm.timestamp, "%Y-%m-%dT%H:%M:%SZ")
-        assert cm.meta_file == os.path.join(d.base_dir, "history", ts + "_request_meta.json")
+        supposed_path = os.path.join(d.base_dir, "history", e1.id, ts + "_request_meta.json")
+        assert cm.meta_file == supposed_path, (cm.meta_file, supposed_path)
         
         # save the new file
         cm.save()
@@ -747,7 +749,7 @@ class TestConnection(TestController):
         print cm.meta_file
         
         # now load from that file
-        cm2 = dip.CommsMeta(d, request=True, meta_file=cm.meta_file)
+        cm2 = dip.CommsMeta(d, e1, meta_file=cm.meta_file)
         
         # none of the properties are set yet
         assert cm2.timestamp == cm.timestamp
@@ -770,7 +772,7 @@ class TestConnection(TestController):
         # now save again
         cm2.save()
         
-        cm3 = dip.CommsMeta(d, request=True, meta_file=cm.meta_file)
+        cm3 = dip.CommsMeta(d, e1, meta_file=cm.meta_file)
         
         # now check the properties have come back
         assert cm3.timestamp == cm.timestamp
