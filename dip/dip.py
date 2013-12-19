@@ -586,12 +586,35 @@ class DIP(object):
             pass
         else:
             # we are creating a new record
+            #
+            # record the parameters of the deposit for the CommsMeta object
             request_record.request_url = endpoint.col_iri
             request_record.method = "POST"
+            request_record.headers['In-Progress'] = "False"
+            
+            # store the body file
+            with open(request_record.body_file, "wb") as bf:
+                bf.write(str(e))
+            
+            # save the request
+            request_record.save()
+            
+            # do the deposit
             receipt = conn.create(col_iri=endpoint.col_iri, metadata_entry=e)
+            
+            # update the endpoint
             endpoint.edit_iri = receipt.location
             self._save_deposit_info()
-        
+            
+            # create a new CommsMeta with the results
+            response_record = CommsMeta(self, endpoint, 
+                                    timestamp=request_record.timestamp, type="response", 
+                                    method="POST", request_url=endpoint.col_iri, response_code=reciept.code)
+            if receipt.dom is not None:
+                with open(response_record.body_file, "wb") as bf:
+                    bf.write(etree.tostring(receipt.dom))
+            response_record.save()
+            
     
     def _deposit_binary(endpoint):
         pass 
@@ -945,9 +968,8 @@ class CommsMeta(object):
         else:
             self.meta_file = meta_file
         
-        # FIXME: this isn't properly thought through yet
-        # record the location of the body file
-        self.body_file = body_file
+        # record the location of the body file (which might still be None)
+        self._body_file = body_file
     
     @property
     def timestamp(self):
@@ -1020,6 +1042,12 @@ class CommsMeta(object):
     def headers(self, value):
         self._raw['headers'] = value
     
+    @property
+    def body_file(self):
+        if self._body_file is None:
+            self._body_file = self._body_file_init()
+        return self._body_file
+    
     def save(self):
         parent = os.path.dirname(self.meta_file)
         if not os.path.isdir(parent):
@@ -1033,6 +1061,11 @@ class CommsMeta(object):
         path = os.path.join(self.dip.base_dir, "history", self.endpoint.id, timestamp + "_" + req_resp + "_meta.json")
         return timestamp, path
 
+    def _body_file_init(self):
+        timestamp = self.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+        req_resp = self.type if self.type is not None else "unknown"
+        path = os.path.join(self.dip.base_dir, "history", self.endpoint.id, timestamp + "_" + req_resp + "_body.xml")
+        return path
 
 
 

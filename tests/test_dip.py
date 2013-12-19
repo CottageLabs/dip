@@ -729,6 +729,20 @@ class TestConnection(TestController):
         assert len(cm.headers.keys()) == 9, cm.headers.keys()
         assert cm.headers['On-Behalf-Of'] == "obo"
         
+        # try constructing with the arguments in the constructor
+        t = datetime.datetime.now()
+        cm = dip.CommsMeta(d, e1, timestamp=t, type="request", method="GET", request_url="http://url", response_code=200,
+                    username="rich", auth_type="Basic", headers={'Header' : 'value'})
+        
+        assert cm.timestamp == t
+        assert cm.method == "GET"
+        assert cm.request_url == "http://url"
+        assert cm.response_code == 200
+        assert cm.username == "rich"
+        assert cm.auth_type == "Basic"
+        assert len(cm.headers.keys()) == 1, cm.headers.keys()
+        assert cm.headers['Header'] == "value"
+        
     def test_28_comms_meta_file(self):
         d = dip.DIP(DIP_DIR)
         
@@ -785,5 +799,6 @@ class TestConnection(TestController):
         assert cm3.headers['On-Behalf-Of'] == "obo"
         assert cm3.headers['Content-Type'] == "application/zip"
 
-        self._preserve_result()
+    def test_29_comms_meta_body(self):
+        pass
 
