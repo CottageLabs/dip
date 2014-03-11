@@ -1,2 +1,4 @@
 *.pyc
 *~
+dip_preserve_dir/
+dip.egg-info/
