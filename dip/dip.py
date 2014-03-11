@@ -270,6 +270,7 @@ class DIP(object):
         You should only supply one of "path" or "string".  If both are provided, the
         "path" will take precedence
         """
+        # NOTE: we are not implementing this yet - dc will suffice for the moment
         pass
         
     def add_dublin_core(self, dcterm, value, lang=None):
@@ -402,7 +403,7 @@ class DIP(object):
         """
         return ds
         
-    def deposit(self, endpoint_id, metadata_only=False, metadata_format="dcterms"):
+    def deposit(self, endpoint_id, metadata_only=False, metadata_format="dcterms", user_pass=None):
         """
         Carry out a deposit (create or update) operation of the DIP to the specified
         endpoint.
@@ -417,7 +418,7 @@ class DIP(object):
             raise DepositException("Endpoint " + endpoint.id + " does not have a Service Document IRI and/or a Collection IRI; deposit cannot proceed")
         
         if metadata_only:
-            return self._deposit_metadata(endpoint, metadata_format)
+            return self._deposit_metadata(endpoint, metadata_format, user_pass=user_pass)
         else:
             return self._deposit_binary(endpoint)
         
@@ -497,7 +498,7 @@ class DIP(object):
         
         # wrap in an ElementTree document, and get it to handle writing it out
         tree = etree.ElementTree(element=self.dc_xml)
-        tree.write(dcterms_file, xml_declaration=True)
+        tree.write(dcterms_file, xml_declaration=True, pretty_print=True, encoding="UTF-8")
             
     def _guarantee_directory(self, dir_path):
         if os.path.exists(dir_path) and not os.path.isdir(dir_path):
@@ -553,7 +554,7 @@ class DIP(object):
         self.deposit_info_raw['files'].append(record)
         self._save_deposit_info()
     
-    def _deposit_metadata(endpoint, metadata_format="dcterms", user_pass=None):
+    def _deposit_metadata(self, endpoint, metadata_format="dcterms", user_pass=None):
         # get the xml metadata
         mdf = self.get_metadata_file(metadata_format)
         if not mdf.path.endswith(".xml"):
@@ -593,8 +594,7 @@ class DIP(object):
             request_record.headers['In-Progress'] = "False"
             
             # store the body file
-            with open(request_record.body_file, "wb") as bf:
-                bf.write(str(e))
+            request_record.write_body_file(str(e))
             
             # save the request
             request_record.save()
@@ -609,14 +609,13 @@ class DIP(object):
             # create a new CommsMeta with the results
             response_record = CommsMeta(self, endpoint, 
                                     timestamp=request_record.timestamp, type="response", 
-                                    method="POST", request_url=endpoint.col_iri, response_code=reciept.code)
+                                    method="POST", request_url=endpoint.col_iri, response_code=receipt.code)
             if receipt.dom is not None:
-                with open(response_record.body_file, "wb") as bf:
-                    bf.write(etree.tostring(receipt.dom))
+                response_record.write_body_file(etree.tostring(receipt.dom))
             response_record.save()
             
     
-    def _deposit_binary(endpoint):
+    def _deposit_binary(self, endpoint):
         pass 
             
 class InitialiseException(Exception):
@@ -1048,13 +1047,23 @@ class CommsMeta(object):
             self._body_file = self._body_file_init()
         return self._body_file
     
+    def write_body_file(self, body):
+        hdir = self._history_dir()
+        if not os.path.exists(hdir):
+            os.mkdir(hdir)
+        with open(self.body_file, "wb") as bf:
+            bf.write(body)
+    
     def save(self):
         parent = os.path.dirname(self.meta_file)
         if not os.path.isdir(parent):
             os.makedirs(parent)
         with open(self.meta_file, "wb") as f:
-            f.write(json.dumps(self._raw))
+            f.write(json.dumps(self._raw, sort_keys=True, indent=2))
             
+    def _history_dir(self):
+        return os.path.join(self.dip.base_dir, "history", self.endpoint.id)
+    
     def _meta_file_init(self):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
         req_resp = self.type if self.type is not None else "unknown"

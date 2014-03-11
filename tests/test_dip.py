@@ -10,7 +10,7 @@ RESOURCES = os.path.join("tests", "resources")
 TESTFILE_MD5 = "6fd9af1196c0f77e463bf2dcfdbef852"
 TESTFILE2_MD5 = "8a86db9c36f1f7a0d8905afe3649b886"
 
-class TestConnection(TestController):
+class TestDIP(TestController):
     
     def _cleanup(self):
         # cleanup the DIP directory
@@ -32,7 +32,6 @@ class TestConnection(TestController):
         if os.path.exists(PRES_DIR):
             shutil.rmtree(PRES_DIR)
         shutil.copytree(DIP_DIR, PRES_DIR)
-        # os.rename(DIP_DIR, PRES_DIR)
     
     def _update_file(self):
         testfile = os.path.join(RESOURCES, "testfile.txt")
@@ -734,7 +733,10 @@ class TestConnection(TestController):
         cm = dip.CommsMeta(d, e1, timestamp=t, type="request", method="GET", request_url="http://url", response_code=200,
                     username="rich", auth_type="Basic", headers={'Header' : 'value'})
         
-        assert cm.timestamp == t
+        # need to get rid of the millis on the timestamp, so send it thorugh the same 
+        # process as CommsMeta should have sent it through
+        compare_stamp = datetime.datetime.strptime(t.strftime("%Y-%m-%dT%H:%M:%SZ"), "%Y-%m-%dT%H:%M:%SZ")
+        assert cm.timestamp == compare_stamp, (cm.timestamp, compare_stamp)
         assert cm.method == "GET"
         assert cm.request_url == "http://url"
         assert cm.response_code == 200
@@ -801,4 +803,30 @@ class TestConnection(TestController):
 
     def test_29_comms_meta_body(self):
         pass
+    
+    def text_100_full_dip(self):
+        # create the DIP
+        d = dip.DIP(DIP_DIR)
+        
+        # add a couple of endpoints
+        e1 = dip.Endpoint(sd_iri="sd1", col_iri="col1", edit_iri="edit1", package="package1", username="un1", obo="obo1", id="1234")
+        d.set_endpoint(e1)
+        
+        e2 = dip.Endpoint(sd_iri="sd2", col_iri="col2", edit_iri="edit2", package="package2", username="un2", obo="obo2", id="5678")
+        d.set_endpoint(e2)
+        
+        # add a couple of files
+        testfile = os.path.join(RESOURCES, "testfile.txt")
+        d.set_file(testfile)
+        
+        tf2 = os.path.join(RESOURCES, "testfile2.txt")
+        d.set_file(tf2)
+        
+        # add some DC metadata
+        d.add_dublin_core("identifier", "123456")
+        d.add_dublin_core("title", "A title", "en")
+        d.add_dublin_core("title", "Titlen", "no")
+        d.add_dublin_core("creator", "Richard")
+        
+        self._preserve_result()
 
