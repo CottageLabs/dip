@@ -122,11 +122,12 @@ class DIP(object):
         
         i = 0
         while i < len(self.deposit_info_raw['files']):
-        # for i in range(len(self.deposit_info_raw['files'])):
             if self.deposit_info_raw['files'][i]['path'] == norm_path:
                 del self.deposit_info_raw['files'][i]
             else:
                 i += 1
+        # Save change to disk
+        self._save_deposit_info()
                 
     def get_endpoints(self):
         """
