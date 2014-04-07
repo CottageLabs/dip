@@ -30,5 +30,5 @@ DIP - Deposit Information Package, SWORDv2 client environment""",
     packages=find_packages(exclude=['tests']),
     include_package_data=True,
     zip_safe=False,
-    install_requires=["sword2"]
+    install_requires=["sword2", "lxml"]
 )

@@ -554,6 +554,9 @@ class DIP(object):
         self.deposit_info_raw['files'].append(record)
         self._save_deposit_info()
     
+    def _metadata_to_endpoint(self, metadata_format, endpoint, timestamp):
+        pass
+    
     def _deposit_metadata(self, endpoint, metadata_format="dcterms", user_pass=None):
         # get the xml metadata
         mdf = self.get_metadata_file(metadata_format)
@@ -584,7 +587,32 @@ class DIP(object):
         # now determine if we are going to do a create or an update
         if endpoint.edit_iri is not None:
             # it's an update
-            pass
+            #
+            # record the parameters of the deposit for the CommsMeta object
+            request_record.request_url = endpoint.edit_iri
+            request_record.method = "PUT"
+            request_record.headers["In-Progress"] = "False"
+            
+            # store the body file
+            request_record.write_body_file(str(e))
+            
+            # save the request
+            request_record.save()
+            
+            # do the update
+            receipt = conn.update(metadata_entry=e, edit_iri=endpoint.edit_iri)
+            
+            # record the deposit
+            mdf.mark_deposited(endpoint.id, request_record.timestamp)
+            
+            # create a new CommsMeta with the results
+            response_record = CommsMeta(self, endpoint, 
+                                    timestamp=request_record.timestamp, type="response", 
+                                    method="PUT", request_url=endpoint.edit_iri, response_code=receipt.code)
+            
+            if receipt.dom is not None:
+                response_record.write_body_file(etree.tostring(receipt.dom))
+            response_record.save()
         else:
             # we are creating a new record
             #
@@ -602,8 +630,9 @@ class DIP(object):
             # do the deposit
             receipt = conn.create(col_iri=endpoint.col_iri, metadata_entry=e)
             
-            # update the endpoint
+            # update the endpoint and other deposit info
             endpoint.edit_iri = receipt.location
+            mdf.mark_deposited(endpoint.id, request_record.timestamp)
             self._save_deposit_info()
             
             # create a new CommsMeta with the results
@@ -764,16 +793,16 @@ class DepositFile(object):
                 return EndpointRecord(end, e['last_deposit'])
         return None
         
-    def _mark_deposited(self, endpoint_id, last_deposited=None):
+    def mark_deposited(self, endpoint_id, last_deposited=None):
         if not self.raw.has_key('endpoints'):
             self.raw['endpoints'] = []
         
         ld = None
         if last_deposited is None:
-            ld = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+            ld = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         else:
             if type(last_deposited) != str:
-                ld = last_deposited.strftime("%Y-%m-%dT%H:%M:%SZ")
+                ld = last_deposited.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
             else:
                 ld = last_deposited
         
@@ -834,16 +863,16 @@ class MetadataFile(object):
                 return EndpointRecord(end, e['last_deposit'])
         return None
         
-    def _mark_deposited(self, endpoint_id, last_deposited=None):
+    def mark_deposited(self, endpoint_id, last_deposited=None):
         if not self.raw.has_key('endpoints'):
             self.raw['endpoints'] = []
         
         ld = None
         if last_deposited is None:
-            ld = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+            ld = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         else:
             if type(last_deposited) != str:
-                ld = last_deposited.strftime("%Y-%m-%dT%H:%M:%SZ")
+                ld = last_deposited.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
             else:
                 ld = last_deposited
         
@@ -867,7 +896,7 @@ class EndpointRecord(object):
     
     @property
     def last_deposit(self):
-        dt = datetime.datetime.strptime(self._last_deposit, "%Y-%m-%dT%H:%M:%SZ")
+        dt = datetime.datetime.strptime(self._last_deposit, "%Y-%m-%dT%H:%M:%S.%fZ")
         return dt
 
 class DepositState(object):
@@ -972,7 +1001,7 @@ class CommsMeta(object):
     
     @property
     def timestamp(self):
-        dt = datetime.datetime.strptime(self._raw.get('timestamp'), "%Y-%m-%dT%H:%M:%SZ")
+        dt = datetime.datetime.strptime(self._raw.get('timestamp'), "%Y-%m-%dT%H:%M:%S.%fZ")
         return dt
     
     @timestamp.setter
@@ -1065,13 +1094,13 @@ class CommsMeta(object):
         return os.path.join(self.dip.base_dir, "history", self.endpoint.id)
     
     def _meta_file_init(self):
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         req_resp = self.type if self.type is not None else "unknown"
         path = os.path.join(self.dip.base_dir, "history", self.endpoint.id, timestamp + "_" + req_resp + "_meta.json")
         return timestamp, path
 
     def _body_file_init(self):
-        timestamp = self.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+        timestamp = self.timestamp.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         req_resp = self.type if self.type is not None else "unknown"
         path = os.path.join(self.dip.base_dir, "history", self.endpoint.id, timestamp + "_" + req_resp + "_body.xml")
         return path
