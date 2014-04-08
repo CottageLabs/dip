@@ -1029,12 +1029,15 @@ class CommsMeta(object):
     
         # if we are not given a meta file, designate a path for it
         if meta_file is None:
-            self._raw['timestamp'], self.meta_file = self._meta_file_init()
+            ts, self.meta_file = self._meta_file_init()
+            if timestamp is None: self.timestamp = ts
         else:
             self.meta_file = meta_file
         
         # record the location of the body file (which might still be None)
         self._body_file = body_file
+        
+        print "init", timestamp, self.timestamp
     
     @property
     def timestamp(self):
@@ -1043,7 +1046,10 @@ class CommsMeta(object):
     
     @timestamp.setter
     def timestamp(self, value):
-        self._raw['timestamp'] = value
+        if isinstance(value, str) or isinstance(value, unicode):
+            self._raw['timestamp'] = value
+        elif isinstance(value, datetime.datetime):
+            self._raw["timestamp"] = value.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     
     @property
     def type(self):

@@ -507,8 +507,8 @@ class TestDIP(TestController):
         
         # now mark each of the files as being deposited into each of the endpoints
         for fr in d.get_files():
-            fr._mark_deposited(e1.id)
-            fr._mark_deposited(e2.id)
+            fr.mark_deposited(e1.id)
+            fr.mark_deposited(e2.id)
         
         # we want to wait a moment to make sure that we can tell the difference between
         # the added and updated timestamps
@@ -719,7 +719,7 @@ class TestDIP(TestController):
         cm = dip.CommsMeta(d, e1, meta_file=os.path.join(RESOURCES, "testmeta.json"))
         
         # all the properties should be set
-        assert cm.timestamp == datetime.datetime.strptime("2013-01-01T00:00:00Z", "%Y-%m-%dT%H:%M:%SZ")
+        assert cm.timestamp == datetime.datetime.strptime("2013-01-01T00:00:00.000000Z", "%Y-%m-%dT%H:%M:%S.%fZ")
         assert cm.method == "POST"
         assert cm.request_url == "http://testurl"
         assert cm.response_code == 200
@@ -730,20 +730,21 @@ class TestDIP(TestController):
         
         # try constructing with the arguments in the constructor
         t = datetime.datetime.now()
-        cm = dip.CommsMeta(d, e1, timestamp=t, type="request", method="GET", request_url="http://url", response_code=200,
+        print t
+        cm2 = dip.CommsMeta(d, e1, timestamp=t, type="request", method="GET", request_url="http://url", response_code=200,
                     username="rich", auth_type="Basic", headers={'Header' : 'value'})
         
         # need to get rid of the millis on the timestamp, so send it thorugh the same 
         # process as CommsMeta should have sent it through
-        compare_stamp = datetime.datetime.strptime(t.strftime("%Y-%m-%dT%H:%M:%SZ"), "%Y-%m-%dT%H:%M:%SZ")
-        assert cm.timestamp == compare_stamp, (cm.timestamp, compare_stamp)
-        assert cm.method == "GET"
-        assert cm.request_url == "http://url"
-        assert cm.response_code == 200
-        assert cm.username == "rich"
-        assert cm.auth_type == "Basic"
-        assert len(cm.headers.keys()) == 1, cm.headers.keys()
-        assert cm.headers['Header'] == "value"
+        compare_stamp = datetime.datetime.strptime(t.strftime("%Y-%m-%dT%H:%M:%S.%fZ"), "%Y-%m-%dT%H:%M:%S.%fZ")
+        assert cm2.timestamp == compare_stamp, (cm2.timestamp, compare_stamp)
+        assert cm2.method == "GET"
+        assert cm2.request_url == "http://url"
+        assert cm2.response_code == 200
+        assert cm2.username == "rich"
+        assert cm2.auth_type == "Basic"
+        assert len(cm2.headers.keys()) == 1, cm.headers.keys()
+        assert cm2.headers['Header'] == "value"
         
     def test_28_comms_meta_file(self):
         d = dip.DIP(DIP_DIR)
@@ -755,7 +756,7 @@ class TestDIP(TestController):
         cm = dip.CommsMeta(d, e1, type="request")
         
         # check that we've got the right file path
-        ts = datetime.datetime.strftime(cm.timestamp, "%Y-%m-%dT%H:%M:%SZ")
+        ts = datetime.datetime.strftime(cm.timestamp, "%Y-%m-%dT%H:%M:%S.%fZ")
         supposed_path = os.path.join(d.base_dir, "history", e1.id, ts + "_request_meta.json")
         assert cm.meta_file == supposed_path, (cm.meta_file, supposed_path)
         

@@ -1,5 +1,5 @@
 {
-    "timestamp" : "2013-01-01T00:00:00Z",
+    "timestamp" : "2013-01-01T00:00:00.000000Z",
     "method" : "POST",
     "request_url" : "http://testurl",
     "response_code" : 200,
