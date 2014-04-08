@@ -1,6 +1,6 @@
-import os, datetime, json, uuid, hashlib, logging, sword2
-# import xml.etree.ElementTree as etree
+import os, datetime, json, uuid, hashlib, logging, sword2, base64
 from lxml import etree
+import packagers
 
 log = logging.getLogger(__name__)
 
@@ -430,12 +430,33 @@ class DIP(object):
         """
         pass
         
-    def package(self, endpoint_id=None, packager=None):
+    def package(self, endpoint_id=None, package_format=None, packager=None, **packager_args):
         """
-        package the DIP up as per either the supplied packager or the endpoint_id
+        package the DIP up as per either the supplied packager or the endpoint_id or the package_format
         and return a read-only file handle
         """
-        pass
+        # work our way through the provided arguments and ensure that we can get
+        # to a packager
+        if endpoint_id is not None:
+            endpoint = self.get_endpoint(endpoint_id)
+            package_format = endpoint.package
+        
+        if package_format is not None:
+            packager = packagers.PackagerFactory.load_packager(package_format)
+        
+        if packager is None:
+            raise PackageException("unable to determine package format")
+        
+        # now we are in a position to package, make sure the output directory exists
+        package_dir = self._package_dir(package_format)
+        
+        packager.package(self, package_dir, **packager_args)
+    
+    def _package_dir(self, package_format):
+        b64 = base64.encodestring(package_format) # so that we can be sure it is an allowable directory name
+        package_dir = os.path.join(self.base_dir, "packages", b64)
+        self._guarantee_directory(package_dir)
+        return package_dir
     
     def get_repository_statement(self, endpoint_id):
         """
@@ -660,7 +681,18 @@ class InitialiseException(Exception):
         
 class DepositException(Exception):
     """
-    Exception to be thrown if the initialisation of a DIP fails
+    Exception to be thrown if a deposit operation fails
+    """
+    def __init__(self, message):
+        super(DepositException, self).__init__(self)
+        self.message = message
+    
+    def __str__(self):
+        return repr(self.message)
+
+class PackageException(Exception):
+    """
+    Exception to be thrown if a package operation fails
     """
     def __init__(self, message):
         super(DepositException, self).__init__(self)
