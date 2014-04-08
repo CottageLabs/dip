@@ -120,9 +120,14 @@ class DIP(object):
         # normalise the file path, to be relative to the self.base_dir, so that we can check it
         norm_path = _normalise_path(path, self.base_dir)
         
-        for i in range(len(self.deposit_info_raw['files'])):
+        i = 0
+        while i < len(self.deposit_info_raw['files']):
             if self.deposit_info_raw['files'][i]['path'] == norm_path:
                 del self.deposit_info_raw['files'][i]
+            else:
+                i += 1
+        # Save change to disk
+        self._save_deposit_info()
                 
     def get_endpoints(self):
         """
