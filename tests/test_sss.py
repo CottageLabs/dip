@@ -52,7 +52,6 @@ class TestSSS(TestController):
         self._cleanup()
     
     def test_01_metadata_deposit_create(self):
-        # construct a new blank DIP
         d = dip.DIP(DIP_DIR)
         
         d.add_dublin_core("identifier", "123456")
@@ -66,7 +65,6 @@ class TestSSS(TestController):
         d.deposit(sss.id, metadata_only=True, user_pass=SSS_PW)
     
     def test_02_metadata_deposit_update(self):
-        # construct a new blank DIP
         d = dip.DIP(DIP_DIR)
         
         d.add_dublin_core("identifier", "123456")
@@ -82,7 +80,24 @@ class TestSSS(TestController):
         # now update it
         d.add_dublin_core("rights", "You have none!!!!")
         d.deposit(sss.id, metadata_only=True, user_pass=SSS_PW)
+    
+    def test_03_deposit_simple_zip(self):
+        d = dip.DIP(DIP_DIR)
         
+        d.add_dublin_core("identifier", "123456")
+        d.add_dublin_core("title", "A title", "en")
+        d.add_dublin_core("title", "Titlen", "no")
+        d.add_dublin_core("creator", "Richard")
+        
+        testfile = os.path.join(RESOURCES, "testfile.txt")
+        d.set_file(testfile)
+        t2 = os.path.join(RESOURCES, "testfile2.txt")
+        d.set_file(t2)
+        
+        sss = dip.Endpoint(sd_iri=SSS_SD, col_iri=SSS_COL, package="http://purl.org/net/sword/package/SimpleZip", username=SSS_UN)
+        d.set_endpoint(endpoint=sss)
+        
+        d.deposit(sss.id, user_pass=SSS_PW)
         self._preserve_result()
         
         

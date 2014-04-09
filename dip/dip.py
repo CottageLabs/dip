@@ -408,7 +408,7 @@ class DIP(object):
         """
         return ds
         
-    def deposit(self, endpoint_id, metadata_only=False, metadata_format="dcterms", user_pass=None):
+    def deposit(self, endpoint_id, metadata_only=False, metadata_format="dcterms", user_pass=None, **packager_args):
         """
         Carry out a deposit (create or update) operation of the DIP to the specified
         endpoint.
@@ -425,7 +425,7 @@ class DIP(object):
         if metadata_only:
             return self._deposit_metadata(endpoint, metadata_format, user_pass=user_pass)
         else:
-            return self._deposit_binary(endpoint)
+            return self._deposit_binary(endpoint, user_pass=user_pass, **packager_args)
         
     def delete(self, endpoint_id):
         """
@@ -671,8 +671,54 @@ class DIP(object):
             response_record.save()
             
     
-    def _deposit_binary(self, endpoint):
-        pass 
+    def _deposit_binary(self, endpoint, user_pass=None, **packager_args):
+        package_path = self.package(endpoint.id, **packager_args)
+        
+        # set up a request record object
+        request_record = CommsMeta(self, endpoint, type="request", username=endpoint.username)
+        if endpoint.obo is not None:
+            request_record.headers['On-Behalf-Of'] = endpoint.obo
+        request_record.headers["Packaging"] = endpoint.package
+        
+        # construct a new connection object around the Service Document identifier
+        conn = sword2.Connection(endpoint.sd_iri, user_name=endpoint.username, user_pass=user_pass, on_behalf_of=endpoint.obo)
+        
+        # now determine if we are going to do a create or an update
+        if endpoint.edit_iri is not None:
+            # it's an update
+            #
+            pass
+        else:
+            # we are creating a new record
+            
+            # record the parameters of the deposit for the CommsMeta object
+            request_record.request_url = endpoint.col_iri
+            request_record.method = "POST"
+            request_record.headers['In-Progress'] = "False"
+            
+            # save the request
+            request_record.save()
+            
+            # do the deposit
+            with open(package_path) as payload:
+                # FIXME: assumes some stuff about the package - probably the packager should give us those things
+                receipt = conn.create(col_iri=endpoint.col_iri, payload=payload, 
+                                        mimetype="application/zip", filename="dip.zip", 
+                                        packaging=endpoint.package)
+            
+            # update the endpoint and other deposit info
+            endpoint.edit_iri = receipt.location
+            # FIXME: need to mark which files got deposited
+            self._save_deposit_info()
+            
+            # create a new CommsMeta with the results
+            response_record = CommsMeta(self, endpoint, 
+                                    timestamp=request_record.timestamp, type="response", 
+                                    method="POST", request_url=endpoint.col_iri, response_code=receipt.code)
+            if receipt.dom is not None:
+                response_record.write_body_file(etree.tostring(receipt.dom))
+            response_record.save()
+        
             
 class InitialiseException(Exception):
     """
