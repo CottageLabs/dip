@@ -438,7 +438,7 @@ class DIP(object):
     def package(self, endpoint_id=None, package_format=None, packager=None, **packager_args):
         """
         package the DIP up as per either the supplied packager or the endpoint_id or the package_format
-        and return a read-only file handle
+        and return a file path
         """
         # work our way through the provided arguments and ensure that we can get
         # to a packager
@@ -455,10 +455,11 @@ class DIP(object):
         # now we are in a position to package, make sure the output directory exists
         package_dir = self._package_dir(package_format)
         
-        packager.package(self, package_dir, **packager_args)
+        path = packager.package(self, package_dir, **packager_args)
+        return path
     
     def _package_dir(self, package_format):
-        b64 = base64.encodestring(package_format) # so that we can be sure it is an allowable directory name
+        b64 = base64.encodestring(package_format).strip() # so that we can be sure it is an allowable directory name
         package_dir = os.path.join(self.base_dir, "packages", b64)
         self._guarantee_directory(package_dir)
         return package_dir
