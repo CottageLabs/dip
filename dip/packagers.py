@@ -25,7 +25,9 @@ class SimpleZipPackager(Packager):
         
         if not do_md and not do_files:
             raise PackagerException("SimpleZipPackager must be instructed to deposit either metadata files, deposit files or both")
-        
+
+        basedir = packager_args.get("basedir", dip.base_dir)
+
         with zipfile.ZipFile(out_zip, "w") as z:
             if do_md:
                 metadata_files = dip.get_metadata_files()
@@ -34,11 +36,16 @@ class SimpleZipPackager(Packager):
             if do_files:
                 deposit_files = dip.get_files()
                 for df in deposit_files:
-                    z.write(df.path, self._filename(df.path))
+                    z.write(df.path, self._filename(df.path, basedir=basedir))
         
         return out_zip
         
-    def _filename(self, path):
+    def _filename(self, path, basedir=None):
+        if basedir:
+            fullbase = os.path.abspath(basedir)
+            fullpath = os.path.abspath(path)
+            if fullpath.startswith(fullbase):
+                return fullpath[len(fullbase):]
         parts = os.path.split(path)
         return parts[1]
         
