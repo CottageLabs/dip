@@ -413,7 +413,10 @@ class DIP(object):
         Carry out a deposit (create or update) operation of the DIP to the specified
         endpoint.
         
-        Returns a tuple: (ResponseMeta, sword2.DepositReceipt)
+        Returns a tuple: (CommsMeta, sword2.DepositReceipt)
+        
+        CommsMeta is the response metadata from the http request
+        sword2.DepositReceipt is the sword2 library's object representing the xml response to a deposit from the server
         """
         # FIXME: need to support pass-through of sword2 client library arguments
         endpoint = self.get_endpoint(endpoint_id)
@@ -640,6 +643,8 @@ class DIP(object):
             if receipt.dom is not None:
                 response_record.write_body_file(etree.tostring(receipt.dom))
             response_record.save()
+            
+            return response_record, receipt
         else:
             # we are creating a new record
             #
@@ -669,6 +674,8 @@ class DIP(object):
             if receipt.dom is not None:
                 response_record.write_body_file(etree.tostring(receipt.dom))
             response_record.save()
+            
+            return response_record, receipt
             
     
     def _deposit_binary(self, endpoint, user_pass=None, **packager_args):
@@ -718,6 +725,8 @@ class DIP(object):
             if receipt.dom is not None:
                 response_record.write_body_file(etree.tostring(receipt.dom))
             response_record.save()
+            
+            return response_record, receipt
         
             
 class InitialiseException(Exception):
