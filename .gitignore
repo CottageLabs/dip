@@ -4,3 +4,4 @@ dip_preserve_dir/
 dip.egg-info/
 /build
 /dist
+.idea
