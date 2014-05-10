@@ -390,25 +390,25 @@ class DIP(object):
             if len(ds._lookup_states(f.path)) == 0:
                 log.info(f.path + " - currently no action on this file")
                 ds.add_state(ds.NO_ACTION, f, None)
-        """
-        FIXME: need to revisit this when metadata files are implemented
+
         for m in self.get_metadata_files():
             # check each metadata file for whether it is up to date with the endpoint or not
             for er in f.endpoints():
                 if f.updated() > er.last_deposit():
                     ds.add_state(ds.OUT_OF_DATE, f, er)
                 else:
-                    ds.add_state(dc.UP_TO_DATE, f, er)
+                    ds.add_state(ds.UP_TO_DATE, f, er)
             # check each endpoint it has been deposited to to check that it has been deposited everywhere
             feids = [er.endpoint.id for er in f.endpoints()]
             deids = [e.id for e in self.get_endpoints()]
             for endpoint in deids:
                 if eid not in feids:
                     ds.add_state(ds.NOT_DEPOSITED, f, f.get_endpoint_record(eid))
-        """
+
         return ds
         
-    def deposit(self, endpoint_id, metadata_only=False, metadata_format="dcterms", user_pass=None, **packager_args):
+    def deposit(self, endpoint_id, metadata_only=False, metadata_format="dcterms",
+                user_pass=None, in_progress=False, metadata_relevant=True, **packager_args):
         """
         Carry out a deposit (create or update) operation of the DIP to the specified
         endpoint.
@@ -418,7 +418,6 @@ class DIP(object):
         CommsMeta is the response metadata from the http request
         sword2.DepositReceipt is the sword2 library's object representing the xml response to a deposit from the server
         """
-        # FIXME: need to support pass-through of sword2 client library arguments
         endpoint = self.get_endpoint(endpoint_id)
         
         # deposit can only go ahead if we have the sd_iri and the col_iri
@@ -426,9 +425,10 @@ class DIP(object):
             raise DepositException("Endpoint " + endpoint.id + " does not have a Service Document IRI and/or a Collection IRI; deposit cannot proceed")
         
         if metadata_only:
-            return self._deposit_metadata(endpoint, metadata_format, user_pass=user_pass)
+            return self._deposit_metadata(endpoint, metadata_format, user_pass=user_pass, in_progress=in_progress)
         else:
-            return self._deposit_binary(endpoint, user_pass=user_pass, **packager_args)
+            return self._deposit_binary(endpoint, user_pass=user_pass, in_progress=in_progress,
+                                        metadata_relevant=metadata_relevant, **packager_args)
         
     def delete(self, endpoint_id, user_pass=None):
         """
@@ -645,7 +645,7 @@ class DIP(object):
     def _metadata_to_endpoint(self, metadata_format, endpoint, timestamp):
         pass
     
-    def _deposit_metadata(self, endpoint, metadata_format="dcterms", user_pass=None):
+    def _deposit_metadata(self, endpoint, metadata_format="dcterms", user_pass=None, in_progress=False):
         # get the xml metadata
         mdf = self.get_metadata_file(metadata_format)
         if not mdf.path.endswith(".xml"):
@@ -679,7 +679,7 @@ class DIP(object):
             # record the parameters of the deposit for the CommsMeta object
             request_record.request_url = endpoint.edit_iri
             request_record.method = "PUT"
-            request_record.headers["In-Progress"] = "False"
+            request_record.headers['In-Progress'] = str(in_progress)
             
             # store the body file
             request_record.write_body_file(str(e))
@@ -688,7 +688,7 @@ class DIP(object):
             request_record.save()
             
             # do the update
-            receipt = conn.update(metadata_entry=e, edit_iri=endpoint.edit_iri)
+            receipt = conn.update(metadata_entry=e, edit_iri=endpoint.edit_iri, in_progress=in_progress)
             
             # record the deposit
             mdf.mark_deposited(endpoint.id, request_record.timestamp)
@@ -709,7 +709,7 @@ class DIP(object):
             # record the parameters of the deposit for the CommsMeta object
             request_record.request_url = endpoint.col_iri
             request_record.method = "POST"
-            request_record.headers['In-Progress'] = "False"
+            request_record.headers['In-Progress'] = str(in_progress)
             
             # store the body file
             request_record.write_body_file(str(e))
@@ -718,7 +718,7 @@ class DIP(object):
             request_record.save()
             
             # do the deposit
-            receipt = conn.create(col_iri=endpoint.col_iri, metadata_entry=e)
+            receipt = conn.create(col_iri=endpoint.col_iri, metadata_entry=e, in_progress=in_progress)
             
             # update the endpoint and other deposit info
             endpoint.edit_iri = receipt.location
@@ -736,7 +736,7 @@ class DIP(object):
             return response_record, receipt
             
     
-    def _deposit_binary(self, endpoint, user_pass=None, **packager_args):
+    def _deposit_binary(self, endpoint, user_pass=None, in_progress=False, metadata_relevant=True, **packager_args):
         package_info = self.package(endpoint.id, **packager_args)
         
         # set up a request record object
@@ -757,7 +757,7 @@ class DIP(object):
 
             request_record.request_url = dr.edit_media
             request_record.method = "PUT"
-            request_record.headers["Metadata-Relevant"] = "True"
+            request_record.headers["Metadata-Relevant"] = str(metadata_relevant)
 
             # save the request
             request_record.save()
@@ -766,7 +766,7 @@ class DIP(object):
             with open(package_info.path) as payload:
                 receipt = conn.update(edit_media_iri=dr.edit_media, payload=payload,
                                       filename=package_info.filename, mimetype=package_info.mimetype,
-                                      packaging=endpoint.package, metadata_relevant=True)
+                                      packaging=endpoint.package, metadata_relevant=metadata_relevant)
 
             # mark which files and metadata got deposited
             for p in package_info.file_paths:
@@ -797,7 +797,7 @@ class DIP(object):
             # record the parameters of the deposit for the CommsMeta object
             request_record.request_url = endpoint.col_iri
             request_record.method = "POST"
-            request_record.headers['In-Progress'] = "False"
+            request_record.headers['In-Progress'] = str(in_progress)
             
             # save the request
             request_record.save()
@@ -806,7 +806,7 @@ class DIP(object):
             with open(package_info.path) as payload:
                 receipt = conn.create(col_iri=endpoint.col_iri, payload=payload, 
                                         filename=package_info.filename, mimetype=package_info.mimetype,
-                                        packaging=endpoint.package)
+                                        packaging=endpoint.package, in_progress=in_progress)
             
             # update the endpoint and other deposit info
             endpoint.edit_iri = receipt.location
