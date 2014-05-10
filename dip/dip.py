@@ -525,14 +525,31 @@ class DIP(object):
         self._guarantee_directory(package_dir)
         return package_dir
     
-    def get_repository_statement(self, endpoint_id):
+    def get_repository_statement(self, endpoint_id, user_pass=None):
         """
         Make a request to the specified endpoint to determine the state of the object
         in the repository.
         
-        Returns a sword2.Statement object
+        Returns a sword2.Sword_Statement object
         """
-        pass
+        endpoint = self.get_endpoint(endpoint_id)
+        if endpoint.edit_iri is None:
+            raise DepositException("Can't get statement from endpoint " + endpoint_id + " as it has never been deposited to")
+
+        # construct a new connection object around the Service Document identifier
+        conn = sword2.Connection(endpoint.sd_iri, user_name=endpoint.username, user_pass=user_pass, on_behalf_of=endpoint.obo)
+
+        # first thing is that we need the statement iri which we can get from the repo
+        dr = conn.get_deposit_receipt(endpoint.edit_iri)
+
+        # now get the statement (try atom or fall back to ore)
+        statement = None
+        if dr.atom_statement_iri is not None:
+            statement = conn.get_atom_sword_statement(dr.atom_statement_iri)
+        elif dr.ore_statement_iri is not None:
+            statement = conn.get_ore_sword_statement(dr.ore_statement_iri)
+
+        return statement
         
     def get_packager(self, endpoint_id=None):
         pass

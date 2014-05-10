@@ -142,5 +142,41 @@ class TestSSS(TestController):
 
         self._preserve_result()
 
+    def test_06_sample_usage(self):
+        # create an example dip directory, with some metadata and some files
+        d = dip.DIP(DIP_DIR)
+
+        d.add_dublin_core("identifier", "123456")
+        d.add_dublin_core("title", "A title", "en")
+        d.add_dublin_core("title", "Titlen", "no")
+        d.add_dublin_core("creator", "Richard")
+
+        testfile = os.path.join(RESOURCES, "testfile.txt")
+        d.set_file(testfile)
+        t2 = os.path.join(RESOURCES, "testfile2.txt")
+        d.set_file(t2)
+
+        # specify the SSS endpoint to which we will deposit
+        sss = dip.Endpoint(sd_iri=SSS_SD, col_iri=SSS_COL, package="http://purl.org/net/sword/package/SimpleZip", username=SSS_UN)
+        d.set_endpoint(endpoint=sss)
+
+        # actually do the deposit - get back a CommsMeta and sword2.DepositReceipt object
+        cm, dr = d.deposit(sss.id, user_pass=SSS_PW)
+
+        # get the URI of the deposited package
+        print dr.edit # the edit uri, which is the identifier of the container object itself
+        print dr.edit_media # the edit media uri which is the identifier for the content of the object
+
+        # find out the state of the deposit
+        statement = d.get_repository_statement(sss.id, user_pass=SSS_PW) # gets a sword2.Statement object
+        states = statement.states   # the statement object provides access to the list of states the object is in
+        for term, description in states:
+            print term      # the URI which represents the state the item is in
+            print description   # a human readable description of the state (e.g. "It is in the Archive!")
+
+        # uncomment this line to fail the test and get the above print statements printed to the screen
+        # when using nosetests in normal operation
+        # assert False
+
 
         
