@@ -441,7 +441,7 @@ class DIP(object):
     def package(self, endpoint_id=None, package_format=None, packager=None, **packager_args):
         """
         package the DIP up as per either the supplied packager or the endpoint_id or the package_format
-        and return a file path
+        and return a PackageInfo object
         """
         # work our way through the provided arguments and ensure that we can get
         # to a packager
@@ -458,9 +458,30 @@ class DIP(object):
         # now we are in a position to package, make sure the output directory exists
         package_dir = self._package_dir(package_format)
         
-        path = packager.package(self, package_dir, **packager_args)
-        return path
-    
+        package_info = packager.package(self, package_dir, **packager_args)
+        return package_info
+
+    def package_cleanup(self, package_info, endpoint_id=None, package_format=None, packager=None, **packager_args):
+        """
+        cleanup the packager's mess (assuming it made any)
+        """
+        # work our way through the provided arguments and ensure that we can get
+        # to a packager
+        if endpoint_id is not None:
+            endpoint = self.get_endpoint(endpoint_id)
+            package_format = endpoint.package
+
+        if package_format is not None:
+            packager = packagers.PackagerFactory.load_packager(package_format)
+
+        if packager is None:
+            raise PackageException("unable to determine package format")
+
+        # sort out the output directory so we can tell the packager where to cleanup
+        package_dir = self._package_dir(package_format)
+
+        packager.cleanup(self, package_dir, package_info, **packager_args)
+
     def _package_dir(self, package_format):
         b64 = base64.encodestring(package_format).strip() # so that we can be sure it is an allowable directory name
         package_dir = os.path.join(self.base_dir, "packages", b64)
@@ -679,7 +700,7 @@ class DIP(object):
             
     
     def _deposit_binary(self, endpoint, user_pass=None, **packager_args):
-        package_path = self.package(endpoint.id, **packager_args)
+        package_info = self.package(endpoint.id, **packager_args)
         
         # set up a request record object
         request_record = CommsMeta(self, endpoint, type="request", username=endpoint.username)
@@ -694,7 +715,45 @@ class DIP(object):
         if endpoint.edit_iri is not None:
             # it's an update
             #
-            pass
+            # first thing is that we need the edit media iri which we can get from the repo
+            dr = conn.get_deposit_receipt(endpoint.edit_iri)
+
+            request_record.request_url = dr.edit_media
+            request_record.method = "PUT"
+            request_record.headers["Metadata-Relevant"] = "True"
+
+            # save the request
+            request_record.save()
+
+            # do the update
+            with open(package_info.path) as payload:
+                receipt = conn.update(edit_media_iri=dr.edit_media, payload=payload,
+                                      filename=package_info.filename, mimetype=package_info.mimetype,
+                                      packaging=endpoint.package, metadata_relevant=True)
+
+            # mark which files and metadata got deposited
+            for p in package_info.file_paths:
+                deposit_file = self.get_file(p)
+                deposit_file.mark_deposited(endpoint.id, request_record.timestamp)
+            for f in package_info.metadata_formats:
+                metadata_file = self.get_metadata_file(f)
+                metadata_file.mark_deposited(endpoint.id, request_record.timestamp)
+
+            self._save_deposit_info()
+
+            # create a new CommsMeta with the results
+            response_record = CommsMeta(self, endpoint,
+                                    timestamp=request_record.timestamp, type="response",
+                                    method="PUT", request_url=dr.edit_media, response_code=receipt.code)
+
+            if receipt.dom is not None:
+                response_record.write_body_file(etree.tostring(receipt.dom))
+            response_record.save()
+
+            # let the packager clean up after itself
+            self.package_cleanup(package_info, endpoint_id=endpoint.id, **packager_args)
+
+            return response_record, receipt
         else:
             # we are creating a new record
             
@@ -707,15 +766,22 @@ class DIP(object):
             request_record.save()
             
             # do the deposit
-            with open(package_path) as payload:
-                # FIXME: assumes some stuff about the package - probably the packager should give us those things
+            with open(package_info.path) as payload:
                 receipt = conn.create(col_iri=endpoint.col_iri, payload=payload, 
-                                        mimetype="application/zip", filename="dip.zip", 
+                                        filename=package_info.filename, mimetype=package_info.mimetype,
                                         packaging=endpoint.package)
             
             # update the endpoint and other deposit info
             endpoint.edit_iri = receipt.location
-            # FIXME: need to mark which files got deposited
+
+            # mark which files and metadata got deposited
+            for p in package_info.file_paths:
+                deposit_file = self.get_file(p)
+                deposit_file.mark_deposited(endpoint.id, request_record.timestamp)
+            for f in package_info.metadata_formats:
+                metadata_file = self.get_metadata_file(f)
+                metadata_file.mark_deposited(endpoint.id, request_record.timestamp)
+
             self._save_deposit_info()
             
             # create a new CommsMeta with the results
@@ -725,7 +791,10 @@ class DIP(object):
             if receipt.dom is not None:
                 response_record.write_body_file(etree.tostring(receipt.dom))
             response_record.save()
-            
+
+            # let the packager clean up after itself
+            self.package_cleanup(package_info, endpoint_id=endpoint.id, **packager_args)
+
             return response_record, receipt
         
             
@@ -1092,8 +1161,6 @@ class CommsMeta(object):
         
         # record the location of the body file (which might still be None)
         self._body_file = body_file
-        
-        print "init", timestamp, self.timestamp
     
     @property
     def timestamp(self):
