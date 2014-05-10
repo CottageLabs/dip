@@ -119,6 +119,28 @@ class TestSSS(TestController):
         cm, dr = d.deposit(sss.id, user_pass=SSS_PW)
         cm, dr = d.deposit(sss.id, user_pass=SSS_PW, remove_zip=True) # also send in a packager arg for giggles
 
+    def test_05_delete(self):
+        d = dip.DIP(DIP_DIR)
+
+        d.add_dublin_core("identifier", "123456")
+        d.add_dublin_core("title", "A title", "en")
+        d.add_dublin_core("title", "Titlen", "no")
+        d.add_dublin_core("creator", "Richard")
+
+        testfile = os.path.join(RESOURCES, "testfile.txt")
+        d.set_file(testfile)
+        t2 = os.path.join(RESOURCES, "testfile2.txt")
+        d.set_file(t2)
+
+        sss = dip.Endpoint(sd_iri=SSS_SD, col_iri=SSS_COL, package="http://purl.org/net/sword/package/SimpleZip", username=SSS_UN)
+        d.set_endpoint(endpoint=sss)
+
+        cm, dr = d.deposit(sss.id, user_pass=SSS_PW)
+
+        # now delete
+        d.delete(sss.id, user_pass=SSS_PW)
+
         self._preserve_result()
+
 
         

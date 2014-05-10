@@ -430,13 +430,50 @@ class DIP(object):
         else:
             return self._deposit_binary(endpoint, user_pass=user_pass, **packager_args)
         
-    def delete(self, endpoint_id):
+    def delete(self, endpoint_id, user_pass=None):
         """
         Delete the object from the specified endpoint
         
-        Returns a ResponseMeta object
+        Returns a tuple: (CommsMeta, sword2.DepositReceipt)
         """
-        pass
+        endpoint = self.get_endpoint(endpoint_id)
+        if endpoint.edit_iri is None:
+            raise DepositException("Can't delete from endpoint " + endpoint_id + " as it has never been deposited to")
+
+        # construct a new connection object around the Service Document identifier
+        conn = sword2.Connection(endpoint.sd_iri, user_name=endpoint.username, user_pass=user_pass, on_behalf_of=endpoint.obo)
+
+        # set up a request record object
+        request_record = CommsMeta(self, endpoint, type="request", username=endpoint.username)
+        if endpoint.obo is not None:
+            request_record.headers['On-Behalf-Of'] = endpoint.obo
+        request_record.method = "DELETE"
+        request_record.request_url = endpoint.edit_iri
+        request_record.save()
+
+        # call delete on the container
+        receipt = conn.delete(endpoint.edit_iri, on_behalf_of=endpoint.obo)
+
+        # build the response object
+        response_record = CommsMeta(self, endpoint,
+                                timestamp=request_record.timestamp, type="response",
+                                method="DELETE", request_url=endpoint.edit_iri, response_code=receipt.code)
+
+        if receipt.dom is not None:
+            response_record.write_body_file(etree.tostring(receipt.dom))
+        response_record.save()
+
+        # now cleanup this endpoint from every file and metadata record
+        for f in self.get_files():
+            f.remove_endpoint_record(endpoint.id)
+        for m in self.get_metadata_files():
+            m.remove_endpoint_record(endpoint.id)
+
+        # remove the edit iri from the endpoint record and save
+        del endpoint.edit_iri
+        self._save_deposit_info()
+
+        return response_record, receipt
         
     def package(self, endpoint_id=None, package_format=None, packager=None, **packager_args):
         """
@@ -882,6 +919,11 @@ class Endpoint(object):
     @edit_iri.setter
     def edit_iri(self, value):
         self.raw['edit_iri'] = value
+
+    @edit_iri.deleter
+    def edit_iri(self):
+        if "edit_iri" in self.raw:
+            del self.raw["edit_iri"]
     
     @property
     def package(self):
@@ -954,6 +996,23 @@ class DepositFile(object):
                 end = self.dip.get_endpoint(endpoint_id)
                 return EndpointRecord(end, e['last_deposit'])
         return None
+
+    def remove_endpoint_record(self, endpoint_id):
+        if "endpoints" not in self.raw:
+            return
+        idx = -1
+        for e in self.raw.get('endpoints', []):
+            idx += 1
+            if e['id'] == endpoint_id:
+                break
+        if idx == -1:
+            return
+        del self.raw["endpoints"][idx]
+
+        if len(self.raw["endpoints"]) == 0:
+            del self.raw["endpoints"]
+
+        self.dip._save_deposit_info()
         
     def mark_deposited(self, endpoint_id, last_deposited=None):
         if not self.raw.has_key('endpoints'):
@@ -1024,7 +1083,24 @@ class MetadataFile(object):
                 end = self.dip.get_endpoint(endpoint_id)
                 return EndpointRecord(end, e['last_deposit'])
         return None
-        
+
+    def remove_endpoint_record(self, endpoint_id):
+        if "endpoints" not in self.raw:
+            return
+        idx = -1
+        for e in self.raw.get('endpoints', []):
+            idx += 1
+            if e['id'] == endpoint_id:
+                break
+        if idx == -1:
+            return
+        del self.raw["endpoints"][idx]
+
+        if len(self.raw["endpoints"]) == 0:
+            del self.raw["endpoints"]
+
+        self.dip._save_deposit_info()
+
     def mark_deposited(self, endpoint_id, last_deposited=None):
         if not self.raw.has_key('endpoints'):
             self.raw['endpoints'] = []
