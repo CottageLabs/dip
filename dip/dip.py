@@ -1093,7 +1093,7 @@ class CommsMeta(object):
         # record the location of the body file (which might still be None)
         self._body_file = body_file
         
-        print "init", timestamp, self.timestamp
+        # print "init", timestamp, self.timestamp  # @@GK: don't generate spurous output to stdout
     
     @property
     def timestamp(self):
